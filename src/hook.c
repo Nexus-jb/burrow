@@ -372,6 +372,8 @@ const char *burrow_status_string(burrow_status status) {
         return "out of memory";
     case BURROW_ERR_PROTECTION:
         return "code memory protection could not be changed";
+    case BURROW_ERR_NOT_FOUND:
+        return "method not found";
     }
     return "unknown status";
 }

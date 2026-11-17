@@ -32,6 +32,8 @@ typedef enum burrow_status {
     BURROW_ERR_NO_MEMORY = 4,
     // Code pages could not be made writable or executable.
     BURROW_ERR_PROTECTION = 5,
+    // The class has no method for the selector (Objective-C hooks).
+    BURROW_ERR_NOT_FOUND = 6,
 } burrow_status;
 
 typedef struct burrow_function_hook {

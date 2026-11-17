@@ -6,7 +6,8 @@
 #
 #   scripts/package-tests.sh <build-dir> <version> <out-dir>
 #
-# <build-dir> holds the signed hook-tests and relocation-tests programs.
+# <build-dir> holds the signed hook-tests, relocation-tests and objc-tests
+# programs.
 # After installing the package, run "burrow-tests" in a terminal.
 
 set -eu
@@ -26,7 +27,7 @@ if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+(\.[0-9]+){1,3}([~+][0-9A-Za-z.
     echo "invalid version: $version" >&2
     exit 1
 fi
-for program in hook-tests relocation-tests; do
+for program in hook-tests relocation-tests objc-tests; do
     if [ ! -x "$build/$program" ]; then
         echo "missing program: $build/$program" >&2
         exit 1
@@ -39,8 +40,8 @@ chmod 0755 "$stage"
 
 libexec="$stage/var/jb/usr/libexec/burrow-tests"
 mkdir -p "$libexec" "$stage/var/jb/usr/bin" "$stage/DEBIAN"
-cp "$build/hook-tests" "$build/relocation-tests" "$libexec/"
-chmod 0755 "$libexec/hook-tests" "$libexec/relocation-tests"
+cp "$build/hook-tests" "$build/relocation-tests" "$build/objc-tests" "$libexec/"
+chmod 0755 "$libexec/hook-tests" "$libexec/relocation-tests" "$libexec/objc-tests"
 
 cat > "$stage/var/jb/usr/bin/burrow-tests" <<'SCRIPT'
 #!/var/jb/bin/sh
@@ -53,10 +54,11 @@ uname -m
 for mode in direct island adrp abs adrp-far abs-far; do
     "$dir/hook-tests" "$mode" || failed=$((failed + 1))
 done
+"$dir/objc-tests" || failed=$((failed + 1))
 if [ "$failed" -eq 0 ]; then
     echo "Burrow tests: all passed"
 else
-    echo "Burrow tests: $failed of 7 programs failed"
+    echo "Burrow tests: $failed of 8 programs failed"
     exit 1
 fi
 SCRIPT
