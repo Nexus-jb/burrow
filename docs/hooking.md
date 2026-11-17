@@ -185,3 +185,4 @@ Device results so far:
 | ------ | ---- | --- | --------- | ----- | ------ |
 | iPhone 14 Pro Max | A16 (arm64 tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.8 | All suites passed |
 | iPhone 14 Pro Max | A16 (arm64 tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.12 | All suites passed, including Objective-C |
+| iPhone 14 Pro Max | A16 (arm64 and arm64e tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.16 | All suites passed for both architectures |
