@@ -66,7 +66,12 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - run: brew install ldid dpkg
+      - run: brew install ldid dpkg make
+      - name: Install Theos
+        run: |
+          git clone --quiet --depth 1 --recurse-submodules --shallow-submodules \
+            https://github.com/theos/theos.git "$RUNNER_TEMP/theos"
+          echo "THEOS=$RUNNER_TEMP/theos" >> "$GITHUB_ENV"
       - name: Build and package
         env:
           VERSION: 0.0.0~dev.${{ github.run_number }}
@@ -78,7 +83,10 @@ jobs:
             dpkg-deb --contents "$deb"
           done
           ldid -e build/ios/arm64e/hook-tests
-          lipo -info build/ios/arm64/hook-tests build/ios/arm64e/hook-tests
+          lipo -info build/ios/arm64/hook-tests build/ios/arm64e/hook-tests build/ios/BurrowSampleTweak.dylib
+          otool -L build/ios/BurrowSampleTweak.dylib
+          otool -l build/ios/BurrowSampleTweak.dylib | grep -A2 LC_RPATH
+          nm -gU build/ios/arm64e/frameworks/CydiaSubstrate.framework/CydiaSubstrate
       - uses: actions/upload-artifact@v4
         with:
           name: burrow-tests-${{ github.run_number }}

@@ -19,6 +19,8 @@
 
 #include <libkern/OSCacheControl.h>
 #include <mach/mach.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -194,5 +196,56 @@ bool burrow_write_code(uintptr_t address, const uint32_t *words, size_t count) {
         }
     }
     sys_icache_invalidate((void *)address, 4 * count);
+    return ok;
+}
+
+bool burrow_write_memory(uintptr_t address, const void *data, size_t size) {
+    if (size == 0) {
+        return true;
+    }
+    const size_t page = burrow_page_size();
+    const uintptr_t first = address & ~(uintptr_t)(page - 1);
+    const uintptr_t last = (address + size - 1) & ~(uintptr_t)(page - 1);
+    const size_t pages = (last - first) / page + 1;
+    if (pages > BURROW_WRITE_MAX_PAGES || address + size < address) {
+        return false;
+    }
+
+    vm_prot_t restore[BURROW_WRITE_MAX_PAGES];
+    for (size_t i = 0; i < pages; i++) {
+        uintptr_t start, end;
+        if (!find_mapping(first + i * page, &start, &end, &restore[i])) {
+            return false;
+        }
+    }
+    // The source may be on one of the pages being changed, so copy it
+    // first.
+    unsigned char *copy = malloc(size);
+    if (!copy) {
+        return false;
+    }
+    memcpy(copy, data, size);
+    const mach_port_t task = mach_task_self();
+
+    size_t changed = 0;
+    while (changed < pages &&
+           raw_vm_protect(task, first + changed * page, page,
+                          VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) == KERN_SUCCESS) {
+        changed++;
+    }
+    bool ok = changed == pages;
+    if (ok) {
+        volatile unsigned char *target = (volatile unsigned char *)address;
+        for (size_t i = 0; i < size; i++) {
+            target[i] = copy[i];
+        }
+    }
+    for (size_t i = 0; i < changed; i++) {
+        if (raw_vm_protect(task, first + i * page, page, restore[i]) != KERN_SUCCESS) {
+            ok = false;
+        }
+    }
+    sys_icache_invalidate((void *)address, size);
+    free(copy);
     return ok;
 }

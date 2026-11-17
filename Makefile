@@ -28,10 +28,11 @@ endif
 
 PORTABLE := src/arm64.c src/relocate.c src/memory_common.c
 OBJC := src/objc.c src/objc_stubs.S
+COMPAT := src/compat.c src/symbols.c
 DARWIN_LIBRARY := $(PORTABLE) src/hook.c src/memory_darwin.c $(OBJC)
 
 ifeq ($(shell uname -s),Darwin)
-LIBRARY := $(DARWIN_LIBRARY)
+LIBRARY := $(DARWIN_LIBRARY) $(COMPAT)
 LDLIBS += -lobjc
 OBJC_TESTS := $(BUILD)/objc-tests
 else
@@ -43,8 +44,10 @@ endif
 IOS_CC ?= xcrun --sdk iphoneos clang
 IOS_ARCHS := arm64 arm64e
 IOS_BUILD := $(BUILD)/ios
-IOS_PROGRAMS := hook-tests relocation-tests objc-tests
+IOS_PROGRAMS := hook-tests relocation-tests objc-tests substrate-tests \
+	frameworks/CydiaSubstrate.framework/CydiaSubstrate
 LDID ?= ldid
+GNUMAKE ?= gmake
 PACKAGE_VERSION ?= 0.0.0~dev
 HEADERS := $(wildcard include/burrow/*.h src/*.h)
 MODES := direct island adrp abs adrp-far abs-far
@@ -97,7 +100,27 @@ $(IOS_BUILD)/%/relocation-tests: tests/relocation_tests.c $(PORTABLE) $(HEADERS)
 	$(IOS_CC) -arch $* -mios-version-min=15.0 $(COMMON) $(CFLAGS) tests/relocation_tests.c $(PORTABLE) -o $@
 	$(LDID) -Stests/ios.entitlements $@
 
-ios-tests: $(foreach arch,$(IOS_ARCHS),$(addprefix $(IOS_BUILD)/$(arch)/,$(IOS_PROGRAMS)))
+# Burrow built as Cydia Substrate: the library that tweaks load.
+$(IOS_BUILD)/%/frameworks/CydiaSubstrate.framework/CydiaSubstrate: $(DARWIN_LIBRARY) $(COMPAT) $(HEADERS)
+	mkdir -p $(@D)
+	$(IOS_CC) -arch $* -mios-version-min=15.0 $(COMMON) -fvisibility=hidden $(CFLAGS) -dynamiclib \
+		-install_name @rpath/CydiaSubstrate.framework/CydiaSubstrate $(DARWIN_LIBRARY) $(COMPAT) -o $@ -lobjc
+	$(LDID) -S $@
+
+# Does not link Burrow: it reaches Burrow through the tweak it loads.
+$(IOS_BUILD)/%/substrate-tests: tests/substrate_tests.c $(HEADERS) tests/ios.entitlements
+	mkdir -p $(@D)
+	$(IOS_CC) -arch $* -mios-version-min=15.0 $(COMMON) $(CFLAGS) tests/substrate_tests.c -o $@ -lobjc
+	$(LDID) -Stests/ios.entitlements $@
+
+# The sample tweak, built with Theos (needs THEOS and GNU Make 4).
+$(IOS_BUILD)/BurrowSampleTweak.dylib: tests/tweak/Tweak.x tests/tweak/Makefile
+	mkdir -p $(@D)
+	$(GNUMAKE) -C tests/tweak FINALPACKAGE=1
+	cp tests/tweak/.theos/obj/BurrowSampleTweak.dylib $@
+
+ios-tests: $(foreach arch,$(IOS_ARCHS),$(addprefix $(IOS_BUILD)/$(arch)/,$(IOS_PROGRAMS))) \
+	$(IOS_BUILD)/BurrowSampleTweak.dylib
 
 ios-tests-package: ios-tests
 	scripts/package-tests.sh $(IOS_BUILD) $(PACKAGE_VERSION) $(BUILD)/packages

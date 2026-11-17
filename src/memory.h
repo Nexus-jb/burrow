@@ -41,6 +41,11 @@ bool burrow_seal(void *address, size_t size);
 // word last, so a single-word patch replaces the instruction in one store.
 bool burrow_write_code(uintptr_t address, const uint32_t *words, size_t count);
 
+// Overwrites up to BURROW_WRITE_MAX_PAGES pages of existing memory, such
+// as code, with `size` bytes from `data`, keeping each page's protection.
+#define BURROW_WRITE_MAX_PAGES 16
+bool burrow_write_memory(uintptr_t address, const void *data, size_t size);
+
 #ifdef BURROW_TESTING
 // Maps memory at least `min_distance` away from `from`.
 void *burrow_map_away(uintptr_t from, uint64_t min_distance, size_t size);

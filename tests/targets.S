@@ -231,6 +231,7 @@ PLAIN(t_duplicate)
 PLAIN(t_batch_a)
 PLAIN(t_batch_b)
 PLAIN(t_batch_partial)
+PLAIN(t_memory)
 
     .p2align 4
 LIT(lit_q):

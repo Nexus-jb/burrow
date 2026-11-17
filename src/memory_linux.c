@@ -231,3 +231,45 @@ bool burrow_write_code(uintptr_t address, const uint32_t *words, size_t count) {
     __builtin___clear_cache((char *)address, (char *)(address + 4 * count));
     return ok;
 }
+
+bool burrow_write_memory(uintptr_t address, const void *data, size_t size) {
+    if (size == 0) {
+        return true;
+    }
+    size_t page = burrow_page_size();
+    uintptr_t first = address & ~(uintptr_t)(page - 1);
+    uintptr_t last = (address + size - 1) & ~(uintptr_t)(page - 1);
+    size_t pages = (last - first) / page + 1;
+    if (pages > BURROW_WRITE_MAX_PAGES || address + size < address) {
+        return false;
+    }
+
+    int restore[BURROW_WRITE_MAX_PAGES];
+    for (size_t i = 0; i < pages; i++) {
+        struct burrow_region region;
+        if (!burrow_query_region(first + i * page, &region)) {
+            return false;
+        }
+        restore[i] = native_protection(region.prot);
+    }
+    size_t changed = 0;
+    while (changed < pages &&
+           mprotect((void *)(first + changed * page), page, restore[changed] | PROT_READ | PROT_WRITE) == 0) {
+        changed++;
+    }
+    bool ok = changed == pages;
+    if (ok) {
+        volatile unsigned char *target = (volatile unsigned char *)address;
+        const unsigned char *source = data;
+        for (size_t i = 0; i < size; i++) {
+            target[i] = source[i];
+        }
+    }
+    for (size_t i = 0; i < changed; i++) {
+        if (mprotect((void *)(first + i * page), page, restore[i]) != 0) {
+            ok = false;
+        }
+    }
+    __builtin___clear_cache((char *)address, (char *)(address + size));
+    return ok;
+}
