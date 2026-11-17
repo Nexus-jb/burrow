@@ -42,9 +42,16 @@ jobs:
         run: make test CC="$CC" SANITIZE="$SANITIZE"
 
   macos:
-    name: macOS arm64
-    runs-on: macos-15
+    name: macOS arm64 (${{ matrix.image }})
+    # The free arm64 macOS runners for public repositories are often at
+    # capacity, so the tests run on several images and any one of them is
+    # enough to check the Darwin backend.
+    runs-on: ${{ matrix.image }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [macos-14, macos-15, macos-26]
     steps:
       - uses: actions/checkout@v7
       - run: make test
