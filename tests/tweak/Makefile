@@ -14,5 +14,7 @@ include $(THEOS)/makefiles/common.mk
 TWEAK_NAME = BurrowSampleTweak
 BurrowSampleTweak_FILES = Tweak.x
 BurrowSampleTweak_CFLAGS = -fobjc-arc
+# burrow_sample_target is found in the process that loads the tweak.
+BurrowSampleTweak_LDFLAGS = -Wl,-U,_burrow_sample_target
 
 include $(THEOS_MAKE_PATH)/tweak.mk

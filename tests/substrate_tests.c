@@ -161,7 +161,7 @@ int main(int argc, char **argv) {
 
     current = "tweak hooks";
     int *status = dlsym(tweak, "burrow_sample_status");
-    CHECK(status && *status == 7);
+    CHECK(status && *status == 15);
     CHECK(burrow_sample_target(5) == 32);
     CHECK(send_int(base_object, value) == 107);
     CHECK(send_int(child_object, value) == 1107);

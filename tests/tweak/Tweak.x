@@ -38,8 +38,11 @@ __attribute__((visibility("default"))) int burrow_sample_status = 0;
 
 %end
 
-// Looked up with MSFindSymbol, then hooked with MSHookFunction.
-%hookf(int, "_burrow_sample_target", int x) {
+// Defined in the test program and bound when the tweak loads (see the
+// Makefile). Logos hooks it with MSHookFunction.
+extern int burrow_sample_target(int x);
+
+%hookf(int, burrow_sample_target, int x) {
     return %orig(x) * 2;
 }
 
@@ -53,4 +56,7 @@ __attribute__((visibility("default"))) int burrow_sample_status = 0;
     }
     %init;
     burrow_sample_status |= 4;
+    if (MSFindSymbol(NULL, "_burrow_sample_target") == (void *)burrow_sample_target) {
+        burrow_sample_status |= 8;
+    }
 }

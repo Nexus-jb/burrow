@@ -79,7 +79,7 @@ jobs:
         timeout-minutes: 10
         env:
           VERSION: 0.0.0~dev.${{ github.run_number }}
-        run: make ios-tests-package PACKAGE_VERSION="$VERSION"
+        run: make ios-tests-package PACKAGE_VERSION="$VERSION" < /dev/null
       - name: Inspect the package
         run: |
           for deb in build/packages/*.deb; do
