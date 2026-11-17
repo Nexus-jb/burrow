@@ -19,8 +19,10 @@
 #define MAP_FIXED_NOREPLACE 0x100000
 #endif
 
+// arm64 Linux gives user space 48 or 52 bits of address, and loads
+// position-independent executables near the top of the 48-bit range.
 #define LOWEST_ADDRESS ((uintptr_t)1 << 20)
-#define HIGHEST_ADDRESS ((uintptr_t)1 << 47)
+#define HIGHEST_ADDRESS ((uintptr_t)1 << 52)
 
 typedef bool (*mapping_visitor)(uintptr_t start, uintptr_t end, int prot, void *context);
 
