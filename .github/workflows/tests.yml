@@ -91,6 +91,8 @@ jobs:
           otool -L build/ios/BurrowSampleTweak.dylib
           otool -l build/ios/BurrowSampleTweak.dylib | grep -A2 LC_RPATH
           nm -gU build/ios/arm64e/frameworks/CydiaSubstrate.framework/CydiaSubstrate
+          nm -m build/ios/arm64/substrate-tests | grep -i "burrow_" || true
+          otool -l build/ios/arm64/substrate-tests | grep -A5 "LC_SYMTAB\|LC_DYSYMTAB" || true
       - uses: actions/upload-artifact@v4
         with:
           name: burrow-tests-${{ github.run_number }}
