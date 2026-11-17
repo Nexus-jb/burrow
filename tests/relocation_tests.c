@@ -102,6 +102,27 @@ static void test_decoding(void) {
     CHECK(a64_decode(0xA9BF7BFDu).kind == A64_OTHER);       // stp x29, x30, [sp, #-16]!
 }
 
+static void test_registers(void) {
+    current = "registers";
+    // Immediates whose bits look like register 16 do not count.
+    CHECK(!a64_mentions_register(a64_adrp(17, 0x10000), 16));
+    CHECK(a64_mentions_register(a64_adrp(17, 0x10000), 17));
+    CHECK(!a64_mentions_register(a64_add_imm(17, 17, 0x410), 16));  // imm12 bits [4:0] are 16
+    CHECK(!a64_mentions_register(a64_add_imm(17, 17, 0x400), 16));  // imm12 bits [10:6] are 16
+    CHECK(a64_mentions_register(a64_add_imm(17, 16, 0), 16));
+    CHECK(!a64_mentions_register(a64_movz(17, 0x0210, 0), 16));
+    CHECK(!a64_mentions_register(a64_ldr_literal_x(17, 0x200), 16));
+    CHECK(!a64_mentions_register(a64_b(0x40), 16));
+    CHECK(!a64_mentions_register(A64_NOP, 16));
+    CHECK(!a64_mentions_register(0xD503237Fu, 16));  // pacibsp
+    CHECK(a64_mentions_register(a64_br(16), 16));
+    CHECK(a64_mentions_register(0xD71F0A11u, 17));   // braa x16, x17
+    CHECK(a64_mentions_register(0xF9400211u, 16));   // ldr x17, [x16]
+    CHECK(a64_mentions_register(0xA9004610u, 17));   // stp x16, x17, [x16]
+    CHECK(!a64_mentions_register(0xA9BF7BFDu, 16));  // stp x29, x30, [sp, #-16]!
+    CHECK(a64_mentions_register(0xAA1003E0u, 16));   // mov x0, x16 (unknown class: conservative)
+}
+
 static void test_plain_copy(void) {
     current = "plain copy";
     const uint32_t words[2] = { 0xA9BF7BFDu, 0x910003FDu };  // stp x29, x30, [sp, #-16]!; mov x29, sp
@@ -298,6 +319,7 @@ static void test_gaps(void) {
 int main(void) {
     test_encodings();
     test_decoding();
+    test_registers();
     test_plain_copy();
     test_far_jump_back();
     test_branch();
