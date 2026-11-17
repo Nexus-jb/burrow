@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+
+# Build output
+build/
+*.o
+*.a
+*.dylib
+*.dSYM/
+
+# Packaging output
+packages/
+dist/
+*.deb
+
+# Editors
+.vscode/
+.idea/
