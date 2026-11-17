@@ -103,7 +103,8 @@ static void *find_in_image(const struct mach_header_64 *header, intptr_t slide, 
             continue;
         }
         uintptr_t address = (uintptr_t)(symbol->n_value + (uint64_t)slide);
-        uint32_t flags = symbol->n_sect < MAX_SECTIONS ? section_flags[symbol->n_sect] : 0;
+        // n_sect is one byte, so it always indexes the table.
+        uint32_t flags = section_flags[symbol->n_sect];
         if (flags & (S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS)) {
             return burrow_function_pointer(address);
         }
