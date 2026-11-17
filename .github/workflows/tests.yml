@@ -77,8 +77,8 @@ jobs:
             dpkg-deb --info "$deb"
             dpkg-deb --contents "$deb"
           done
-          ldid -e build/ios-arm64/hook-tests
-          lipo -info build/ios-arm64/hook-tests
+          ldid -e build/ios/arm64e/hook-tests
+          lipo -info build/ios/arm64/hook-tests build/ios/arm64e/hook-tests
       - uses: actions/upload-artifact@v4
         with:
           name: burrow-tests-${{ github.run_number }}

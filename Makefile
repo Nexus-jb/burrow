@@ -41,9 +41,9 @@ OBJC_TESTS :=
 endif
 
 IOS_CC ?= xcrun --sdk iphoneos clang
-IOS_ARCH ?= arm64
-IOS_FLAGS := -arch $(IOS_ARCH) -mios-version-min=15.0
-IOS_BUILD := $(BUILD)/ios-$(IOS_ARCH)
+IOS_ARCHS := arm64 arm64e
+IOS_BUILD := $(BUILD)/ios
+IOS_PROGRAMS := hook-tests relocation-tests objc-tests
 LDID ?= ldid
 PACKAGE_VERSION ?= 0.0.0~dev
 HEADERS := $(wildcard include/burrow/*.h src/*.h)
@@ -81,22 +81,23 @@ test: test-relocation $(BUILD)/hook-tests $(OBJC_TESTS)
 	@for mode in $(MODES); do $(RUN) $(BUILD)/hook-tests $$mode || exit 1; done
 	@for program in $(OBJC_TESTS); do $(RUN) $$program || exit 1; done
 
-$(IOS_BUILD):
-	mkdir -p $@
-
-$(IOS_BUILD)/hook-tests: tests/hook_tests.c tests/targets.S $(DARWIN_LIBRARY) $(HEADERS) tests/ios.entitlements | $(IOS_BUILD)
-	$(IOS_CC) $(IOS_FLAGS) $(COMMON) -DBURROW_TESTING $(CFLAGS) tests/hook_tests.c tests/targets.S $(DARWIN_LIBRARY) -o $@ -lobjc
+# One set of test programs per architecture: build/ios/arm64, build/ios/arm64e.
+$(IOS_BUILD)/%/hook-tests: tests/hook_tests.c tests/targets.S $(DARWIN_LIBRARY) $(HEADERS) tests/ios.entitlements
+	mkdir -p $(@D)
+	$(IOS_CC) -arch $* -mios-version-min=15.0 $(COMMON) -DBURROW_TESTING $(CFLAGS) tests/hook_tests.c tests/targets.S $(DARWIN_LIBRARY) -o $@ -lobjc
 	$(LDID) -Stests/ios.entitlements $@
 
-$(IOS_BUILD)/objc-tests: tests/objc_tests.c $(DARWIN_LIBRARY) $(HEADERS) tests/ios.entitlements | $(IOS_BUILD)
-	$(IOS_CC) $(IOS_FLAGS) $(COMMON) $(CFLAGS) tests/objc_tests.c $(DARWIN_LIBRARY) -o $@ -lobjc
+$(IOS_BUILD)/%/objc-tests: tests/objc_tests.c $(DARWIN_LIBRARY) $(HEADERS) tests/ios.entitlements
+	mkdir -p $(@D)
+	$(IOS_CC) -arch $* -mios-version-min=15.0 $(COMMON) $(CFLAGS) tests/objc_tests.c $(DARWIN_LIBRARY) -o $@ -lobjc
 	$(LDID) -Stests/ios.entitlements $@
 
-$(IOS_BUILD)/relocation-tests: tests/relocation_tests.c $(PORTABLE) $(HEADERS) tests/ios.entitlements | $(IOS_BUILD)
-	$(IOS_CC) $(IOS_FLAGS) $(COMMON) $(CFLAGS) tests/relocation_tests.c $(PORTABLE) -o $@
+$(IOS_BUILD)/%/relocation-tests: tests/relocation_tests.c $(PORTABLE) $(HEADERS) tests/ios.entitlements
+	mkdir -p $(@D)
+	$(IOS_CC) -arch $* -mios-version-min=15.0 $(COMMON) $(CFLAGS) tests/relocation_tests.c $(PORTABLE) -o $@
 	$(LDID) -Stests/ios.entitlements $@
 
-ios-tests: $(IOS_BUILD)/hook-tests $(IOS_BUILD)/relocation-tests $(IOS_BUILD)/objc-tests
+ios-tests: $(foreach arch,$(IOS_ARCHS),$(addprefix $(IOS_BUILD)/$(arch)/,$(IOS_PROGRAMS)))
 
 ios-tests-package: ios-tests
 	scripts/package-tests.sh $(IOS_BUILD) $(PACKAGE_VERSION) $(BUILD)/packages

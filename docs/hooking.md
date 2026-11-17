@@ -134,9 +134,22 @@ including ones that return large structures. If a process uses all 4096,
 `original` falls back to the superclass's implementation at the time of the
 hook.
 
-## Not supported yet
+## Pointer authentication (arm64e)
 
-- Pointer authentication on arm64e.
+On arm64e, function pointers carry a signature in their upper bits. Burrow
+strips the signature from the target and replacement it is given, so
+signed and unsigned pointers both work, and it signs every code pointer it
+hands out (trampolines and Objective-C stubs) the way the compiler signs a
+C function pointer: key IA, discriminator 0. Callers can therefore call
+`original` like any function pointer. The Objective-C stub routine
+authenticates the implementation it gets from the runtime with `braaz`.
+
+Instructions that use pointer authentication, such as `pacibsp` at the
+start of compiled functions, are moved like any other instruction. Each
+moved instruction runs with the same stack pointer as before, so return
+addresses are signed and authenticated with the same modifier.
+
+## Not supported yet
 - Removing hooks.
 - Suspending other threads while code is patched. Hooks are normally
   installed while a tweak loads, before the process starts other work.
@@ -154,6 +167,8 @@ hook.
   four-word patches, and both of those with trampolines more than 4 GiB away.
   If a hook crashes the process, it prints the mode and the test that was
   running.
+- On arm64e, `hook-tests` also hooks a function that starts with
+  `pacibsp` and ends with `retab`, and passes signed pointers to the engine.
 - `tests/objc_tests.c` builds classes at run time and hooks their methods:
   defined and inherited methods, a superclass hooked after its subclass,
   chains, class methods, and methods with structure returns, floating-point
@@ -161,8 +176,8 @@ hook.
 
 Both suites also run on jailbroken iPhones. CI builds them into a rootless
 package, `com.nexusjb.burrow-tests` (or run `make ios-tests-package` with
-Xcode, ldid and dpkg installed). Install it, then run `burrow-tests` in a
-terminal.
+Xcode, ldid and dpkg installed), once for arm64 and once for arm64e. Install
+it, then run `burrow-tests` in a terminal: it runs both sets.
 
 Device results so far:
 

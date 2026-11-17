@@ -96,6 +96,9 @@ static void test_decoding(void) {
     CHECK(a64_decode(0xD4200000u).kind == A64_TERMINATOR);  // brk #0
     CHECK(a64_decode(0xD4000001u).kind == A64_OTHER);       // svc #0
     CHECK(a64_decode(0xD503237Fu).kind == A64_OTHER);       // pacibsp
+    CHECK(a64_decode(0xD65F0FFFu).kind == A64_TERMINATOR);  // retab
+    CHECK(a64_decode(0xD61F0A1Fu).kind == A64_TERMINATOR);  // braaz x16
+    CHECK(a64_decode(0xD63F0A1Fu).kind == A64_OTHER);       // blraaz x16
     CHECK(a64_decode(0xA9BF7BFDu).kind == A64_OTHER);       // stp x29, x30, [sp, #-16]!
 }
 
