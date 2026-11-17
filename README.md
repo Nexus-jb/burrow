@@ -57,6 +57,13 @@ On another Linux machine, the tests can run under QEMU:
 make test CC=aarch64-linux-gnu-gcc RUN="qemu-aarch64 -L /usr/aarch64-linux-gnu"
 ```
 
+To run the tests on a jailbroken iPhone, build the test package on a Mac
+with Xcode, ldid and dpkg, install it, and run `burrow-tests` on the device:
+
+```sh
+make ios-tests-package PACKAGE_VERSION=0.0.0~dev.1
+```
+
 [docs/hooking.md](docs/hooking.md) explains how hooks are installed and which
 rules keep them safe. Release packages will be built on GitHub Actions,
 signed, and published with build provenance attestations.

@@ -5,15 +5,19 @@
 // fill whole pages of their own, so patching them never changes a page that
 // holds the hooking engine.
 
+// Apple's arm64 assembler starts a comment at ";" and separates
+// statements with "%%"; GNU and LLVM ELF assemblers separate with ";".
 #if defined(__APPLE__)
-#define FN(name) .globl _##name ; .p2align 2 ; _##name:
+#define SEP %%
+#define FN(name) .globl _##name SEP .p2align 2 SEP _##name:
 #define CALL(name) _##name
 #define LIT(name) L##name
 #define PAGE(name) L##name@PAGE
 #define PAGEOFF(name) L##name@PAGEOFF
     .section __TEXT,__burrow_tests,regular,pure_instructions
 #else
-#define FN(name) .globl name ; .type name, %function ; .p2align 2 ; name:
+#define SEP ;
+#define FN(name) .globl name SEP .type name, %function SEP .p2align 2 SEP name:
 #define CALL(name) name
 #define LIT(name) .L##name
 #define PAGE(name) .L##name
@@ -209,7 +213,7 @@ FN(t_inbound)
     ret
 
 // x + 1, for tests that need a fresh function
-#define PLAIN(name) FN(name) add x0, x0, #1 ; nop ; nop ; nop ; ret
+#define PLAIN(name) FN(name) add x0, x0, #1 SEP nop SEP nop SEP nop SEP ret
 PLAIN(t_chain)
 PLAIN(t_foreign)
 PLAIN(t_duplicate)

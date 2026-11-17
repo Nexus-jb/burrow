@@ -17,9 +17,20 @@
 #include "memory.h"
 
 #include <inttypes.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define UNDER_ASAN 1
+#endif
+#endif
+#if defined(__SANITIZE_ADDRESS__)
+#define UNDER_ASAN 1
+#endif
 
 typedef uint64_t (*fn)(uint64_t);
 
@@ -286,7 +297,45 @@ static void test_batches(void) {
     CHECK(original_b && ((fn)original_b)(2) == 3);
 }
 
+static size_t append(char *line, size_t length, size_t capacity, const char *text) {
+    while (*text && length + 1 < capacity) {
+        line[length++] = *text++;
+    }
+    return length;
+}
+
+// Names the test that was running when a hook crashed the process. Only
+// async-signal-safe calls are made here.
+static void report_crash(int signal_number) {
+    char line[256];
+    char number[4] = { (char)('0' + signal_number / 10 % 10), (char)('0' + signal_number % 10), ')', 0 };
+    size_t length = 0;
+    length = append(line, length, sizeof line, "[");
+    length = append(line, length, sizeof line, mode ? mode->name : "?");
+    length = append(line, length, sizeof line, "] crashed in ");
+    length = append(line, length, sizeof line, current ? current : "setup");
+    length = append(line, length, sizeof line, " (signal ");
+    length = append(line, length, sizeof line, number);
+    length = append(line, length, sizeof line, "\n");
+    (void)!write(STDERR_FILENO, line, length);
+    _exit(128 + signal_number);
+}
+
+static void install_crash_reporter(void) {
+#ifndef UNDER_ASAN
+    static const int signals[] = { SIGSEGV, SIGBUS, SIGILL, SIGTRAP, SIGFPE };
+    struct sigaction action;
+    memset(&action, 0, sizeof action);
+    action.sa_handler = report_crash;
+    sigemptyset(&action.sa_mask);
+    for (size_t i = 0; i < sizeof signals / sizeof signals[0]; i++) {
+        sigaction(signals[i], &action, NULL);
+    }
+#endif
+}
+
 int main(int argc, char **argv) {
+    install_crash_reporter();
     if (argc != 2) {
         fprintf(stderr, "usage: %s MODE\n", argv[0]);
         return 2;

@@ -128,3 +128,10 @@ with `mach_vm_protect` can still be hooked.
   functions. It runs on arm64 Linux and macOS, once per mode: one-word
   patches straight to the replacement or through an island, three- and
   four-word patches, and both of those with trampolines more than 4 GiB away.
+  If a hook crashes the process, it prints the mode and the test that was
+  running.
+
+Both suites also run on jailbroken iPhones. CI builds them into a rootless
+package, `com.nexusjb.burrow-tests` (or run `make ios-tests-package` with
+Xcode, ldid and dpkg installed). Install it, then run `burrow-tests` in a
+terminal.
