@@ -72,7 +72,11 @@ jobs:
           git clone --quiet --depth 1 --recurse-submodules --shallow-submodules \
             https://github.com/theos/theos.git "$RUNNER_TEMP/theos"
           echo "THEOS=$RUNNER_TEMP/theos" >> "$GITHUB_ENV"
+      - name: Build the sample tweak with Theos
+        timeout-minutes: 10
+        run: make build/ios/BurrowSampleTweak.dylib GNUMAKE="gmake messages=yes" < /dev/null
       - name: Build and package
+        timeout-minutes: 10
         env:
           VERSION: 0.0.0~dev.${{ github.run_number }}
         run: make ios-tests-package PACKAGE_VERSION="$VERSION"
