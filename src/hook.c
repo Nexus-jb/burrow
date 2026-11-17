@@ -13,6 +13,7 @@
 #include "arm64.h"
 #include "internal.h"
 #include "memory.h"
+#include "pac.h"
 #include "relocate.h"
 
 #include <pthread.h>
@@ -165,8 +166,9 @@ static void find_inbound_branches(uintptr_t target, size_t available_words, bool
 }
 
 static burrow_status plan_hook(struct batch *batch, const burrow_function_hook *hook, struct plan *plan) {
-    const uintptr_t target = (uintptr_t)hook->target;
-    const uintptr_t replacement = (uintptr_t)hook->replacement;
+    // On arm64e the pointers may be signed; patches need the code addresses.
+    const uintptr_t target = burrow_code_address(hook->target);
+    const uintptr_t replacement = burrow_code_address(hook->replacement);
     if (!target || !replacement || (target & 3)) {
         return BURROW_ERR_INVALID_ARGUMENT;
     }
@@ -279,7 +281,7 @@ burrow_status burrow_hook_functions(const burrow_function_hook *hooks, size_t co
     }
     for (size_t i = 1; i < count; i++) {
         for (size_t j = 0; j < i; j++) {
-            if (hooks[i].target == hooks[j].target) {
+            if (burrow_code_address(hooks[i].target) == burrow_code_address(hooks[j].target)) {
                 if (failed_index) {
                     *failed_index = i;
                 }
@@ -317,7 +319,7 @@ burrow_status burrow_hook_functions(const burrow_function_hook *hooks, size_t co
         keep_slabs = true;
         for (size_t i = 0; i < count; i++) {
             if (hooks[i].original) {
-                *hooks[i].original = (void *)plans[i].trampoline;
+                *hooks[i].original = burrow_function_pointer(plans[i].trampoline);
             }
         }
         __atomic_thread_fence(__ATOMIC_SEQ_CST);

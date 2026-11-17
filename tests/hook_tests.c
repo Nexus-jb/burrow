@@ -15,6 +15,7 @@
 #include "arm64.h"
 #include "internal.h"
 #include "memory.h"
+#include "pac.h"
 
 #include <inttypes.h>
 #include <signal.h>
@@ -66,8 +67,9 @@ static int checks;
 static const uint64_t inputs[] = { 0, 3, 4, 8, 9, 12, 100 };
 #define INPUT_COUNT (sizeof inputs / sizeof inputs[0])
 
+// The code address of a function, without an arm64e signature.
 static uintptr_t address_of(fn function) {
-    return (uintptr_t)function;
+    return burrow_code_address((const void *)function);
 }
 
 static uint64_t distance(uintptr_t a, uintptr_t b) {
@@ -107,8 +109,16 @@ static uint64_t distance(uintptr_t a, uintptr_t b) {
     static uint64_t name##_replacement(uint64_t x) {      \
         return name##_original(x) * 2 + 1;                \
     }
+// arm64e only: a function that uses pointer authentication.
+#if defined(__arm64e__)
+#define PAC_TARGETS(X) X(t_pac)
+#else
+#define PAC_TARGETS(X)
+#endif
+
 MOVABLE(DECLARE)
 ONE_WORD_ONLY(DECLARE)
+PAC_TARGETS(DECLARE)
 
 uint64_t t_after_short(uint64_t);
 uint64_t t_chain(uint64_t);
@@ -201,11 +211,16 @@ static void test_chain(void) {
     current = "chain";
     CHECK(burrow_hook_function((void *)address_of(t_chain), (void *)address_of(chain_first),
                                (void **)&chain_first_original) == BURROW_OK);
-    CHECK(burrow_hook_function((void *)address_of(t_chain), (void *)address_of(chain_second),
+    // Signed function pointers on arm64e: the engine strips them.
+    CHECK(burrow_hook_function((void *)t_chain, (void *)chain_second,
                                (void **)&chain_second_original) == BURROW_OK);
     for (size_t i = 0; i < INPUT_COUNT; i++) {
         CHECK(t_chain(inputs[i]) == (inputs[i] + 1 + 10) * 3);
     }
+#ifdef BURROW_PTRAUTH
+    // The trampolines are handed out signed, like C function pointers.
+    CHECK((uintptr_t)chain_second_original != address_of(chain_second_original));
+#endif
 }
 
 static uint64_t foreign_replacement(uint64_t x) {
@@ -358,6 +373,7 @@ int main(int argc, char **argv) {
 #define RUN_MOVABLE(name) test_target(#name, name, name##_replacement, &name##_original, true);
 #define RUN_ONE_WORD(name) test_target(#name, name, name##_replacement, &name##_original, false);
     MOVABLE(RUN_MOVABLE)
+    PAC_TARGETS(RUN_MOVABLE)
     ONE_WORD_ONLY(RUN_ONE_WORD)
     test_short_neighbor();
     test_chain();

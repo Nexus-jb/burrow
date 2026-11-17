@@ -52,6 +52,11 @@ Lsuper_common:
     ldp x0, x1, [sp, #0]
     add sp, sp, #208
     ldp x29, x30, [sp], #16
+#if defined(__arm64e__)
+    // The runtime returns a signed implementation pointer.
+    braaz x16
+#else
     br x16
+#endif
 
 #endif

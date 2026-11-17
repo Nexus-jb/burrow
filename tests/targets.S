@@ -168,6 +168,17 @@ FN(t_loop)
     mov x0, x1
     ret
 
+#if defined(__arm64e__)
+// Signs and authenticates its return address, like compiled arm64e code
+FN(t_pac)
+    pacibsp
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    add x0, x0, #1
+    ldp x29, x30, [sp], #16
+    retab
+#endif
+
 // Uses x17 at the entry, so patches need x16
 FN(t_x17)
     mov x17, x0

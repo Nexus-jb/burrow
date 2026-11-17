@@ -5,6 +5,7 @@
 #include <burrow/objc.h>
 
 #include "objc_stubs.h"
+#include "pac.h"
 
 #include <objc/runtime.h>
 #include <pthread.h>
@@ -46,7 +47,8 @@ static IMP super_caller(Class cls, SEL selector, Method inherited) {
     size_t index = super_entries_used++;
     super_entries[index].cls = cls;
     super_entries[index].selector = selector;
-    return (IMP)(burrow_objc_super_stubs + index * BURROW_SUPER_STUB_SIZE);
+    uintptr_t stub = burrow_code_address(burrow_objc_super_stubs) + index * BURROW_SUPER_STUB_SIZE;
+    return (IMP)burrow_function_pointer(stub);
 }
 
 burrow_status burrow_hook_message(Class cls, SEL selector, IMP replacement, IMP *original) {

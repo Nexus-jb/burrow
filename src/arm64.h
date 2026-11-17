@@ -42,8 +42,10 @@ typedef struct a64_insn {
 
 a64_insn a64_decode(uint32_t word);
 
-// True if any register field of the word could name `reg`. Fields that hold
-// immediates also count, so the answer errs on the side of "yes".
+// True if the instruction could read or write general register `reg`.
+// Common instruction classes are decoded exactly; for the rest, any field
+// that could hold a register counts, so the answer errs on the side of
+// "yes".
 bool a64_mentions_register(uint32_t word, unsigned reg);
 
 // True for the absolute jump "LDR Xn, #8; BR Xn; .quad address" that most

@@ -6,8 +6,8 @@
 #
 #   scripts/package-tests.sh <build-dir> <version> <out-dir>
 #
-# <build-dir> holds the signed hook-tests, relocation-tests and objc-tests
-# programs.
+# <build-dir> holds one directory per architecture (arm64 and arm64e), each
+# with the signed hook-tests, relocation-tests and objc-tests programs.
 # After installing the package, run "burrow-tests" in a terminal.
 
 set -eu
@@ -27,11 +27,15 @@ if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+(\.[0-9]+){1,3}([~+][0-9A-Za-z.
     echo "invalid version: $version" >&2
     exit 1
 fi
-for program in hook-tests relocation-tests objc-tests; do
-    if [ ! -x "$build/$program" ]; then
-        echo "missing program: $build/$program" >&2
-        exit 1
-    fi
+architectures="arm64 arm64e"
+programs="hook-tests relocation-tests objc-tests"
+for arch in $architectures; do
+    for program in $programs; do
+        if [ ! -x "$build/$arch/$program" ]; then
+            echo "missing program: $build/$arch/$program" >&2
+            exit 1
+        fi
+    done
 done
 
 stage=$(mktemp -d)
@@ -39,26 +43,34 @@ trap 'rm -rf "$stage"' EXIT
 chmod 0755 "$stage"
 
 libexec="$stage/var/jb/usr/libexec/burrow-tests"
-mkdir -p "$libexec" "$stage/var/jb/usr/bin" "$stage/DEBIAN"
-cp "$build/hook-tests" "$build/relocation-tests" "$build/objc-tests" "$libexec/"
-chmod 0755 "$libexec/hook-tests" "$libexec/relocation-tests" "$libexec/objc-tests"
+mkdir -p "$stage/var/jb/usr/bin" "$stage/DEBIAN"
+for arch in $architectures; do
+    mkdir -p "$libexec/$arch"
+    for program in $programs; do
+        cp "$build/$arch/$program" "$libexec/$arch/"
+        chmod 0755 "$libexec/$arch/$program"
+    done
+done
 
 cat > "$stage/var/jb/usr/bin/burrow-tests" <<'SCRIPT'
 #!/var/jb/bin/sh
 # SPDX-License-Identifier: Apache-2.0
-# Runs Burrow's tests on this device.
-dir=/var/jb/usr/libexec/burrow-tests
+# Runs Burrow's tests on this device, built for arm64 and for arm64e.
 failed=0
 uname -m
-"$dir/relocation-tests" || failed=$((failed + 1))
-for mode in direct island adrp abs adrp-far abs-far; do
-    "$dir/hook-tests" "$mode" || failed=$((failed + 1))
+for arch in arm64 arm64e; do
+    dir=/var/jb/usr/libexec/burrow-tests/$arch
+    echo "== $arch"
+    "$dir/relocation-tests" || failed=$((failed + 1))
+    for mode in direct island adrp abs adrp-far abs-far; do
+        "$dir/hook-tests" "$mode" || failed=$((failed + 1))
+    done
+    "$dir/objc-tests" || failed=$((failed + 1))
 done
-"$dir/objc-tests" || failed=$((failed + 1))
 if [ "$failed" -eq 0 ]; then
     echo "Burrow tests: all passed"
 else
-    echo "Burrow tests: $failed of 8 programs failed"
+    echo "Burrow tests: $failed of 16 programs failed"
     exit 1
 fi
 SCRIPT

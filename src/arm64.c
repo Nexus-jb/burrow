@@ -109,8 +109,42 @@ a64_insn a64_decode(uint32_t w) {
 }
 
 bool a64_mentions_register(uint32_t word, unsigned reg) {
-    return (word & 31u) == reg || ((word >> 5) & 31u) == reg ||
-           ((word >> 10) & 31u) == reg || ((word >> 16) & 31u) == reg;
+    const unsigned rd = word & 31u;            // Rd, Rt
+    const unsigned rn = (word >> 5) & 31u;     // Rn
+    const unsigned rt2 = (word >> 10) & 31u;   // Rt2, Ra
+
+    // Hints (NOP, PACIBSP, AUTIBSP, BTI...) use no general registers.
+    if ((word & 0xFFFFF01Fu) == 0xD503201Fu) {
+        return false;
+    }
+    // Instructions whose only register is Rd or Rt: ADR, ADRP, MOVN, MOVZ,
+    // MOVK, LDR (literal), CBZ, CBNZ, TBZ, TBNZ.
+    if ((word & 0x1F000000u) == 0x10000000u || (word & 0x1F800000u) == 0x12800000u ||
+        (word & 0x3B000000u) == 0x18000000u || (word & 0x7C000000u) == 0x34000000u) {
+        return rd == reg;
+    }
+    // B, BL, B.cond: no general registers.
+    if ((word & 0x7C000000u) == 0x14000000u || (word & 0xFF000000u) == 0x54000000u) {
+        return false;
+    }
+    // ADD and SUB (immediate), logical (immediate): Rd and Rn.
+    if ((word & 0x1F000000u) == 0x11000000u || (word & 0x1F800000u) == 0x12000000u) {
+        return rd == reg || rn == reg;
+    }
+    // Branch to register: Rn, and the modifier register of BRAA and BLRAA.
+    if ((word & 0xFE000000u) == 0xD6000000u) {
+        return rn == reg || rd == reg;
+    }
+    // Load and store (unsigned immediate offset): Rt and Rn.
+    if ((word & 0x3B000000u) == 0x39000000u) {
+        return rd == reg || rn == reg;
+    }
+    // Load and store pair: Rt, Rn and Rt2.
+    if ((word & 0x3A000000u) == 0x28000000u) {
+        return rd == reg || rn == reg || rt2 == reg;
+    }
+    // Anything else: every field that could hold a register.
+    return rd == reg || rn == reg || rt2 == reg || ((word >> 16) & 31u) == reg;
 }
 
 bool a64_is_absolute_jump(const uint32_t *words, size_t count) {
