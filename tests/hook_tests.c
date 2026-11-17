@@ -297,6 +297,8 @@ static void test_batches(void) {
     CHECK(original_b && ((fn)original_b)(2) == 3);
 }
 
+// AddressSanitizer reports crashes itself, so the reporter is left out.
+#ifndef UNDER_ASAN
 static size_t append(char *line, size_t length, size_t capacity, const char *text) {
     while (*text && length + 1 < capacity) {
         line[length++] = *text++;
@@ -322,7 +324,6 @@ static void report_crash(int signal_number) {
 }
 
 static void install_crash_reporter(void) {
-#ifndef UNDER_ASAN
     static const int signals[] = { SIGSEGV, SIGBUS, SIGILL, SIGTRAP, SIGFPE };
     struct sigaction action;
     memset(&action, 0, sizeof action);
@@ -331,8 +332,11 @@ static void install_crash_reporter(void) {
     for (size_t i = 0; i < sizeof signals / sizeof signals[0]; i++) {
         sigaction(signals[i], &action, NULL);
     }
-#endif
 }
+#else
+static void install_crash_reporter(void) {
+}
+#endif
 
 int main(int argc, char **argv) {
     install_crash_reporter();
