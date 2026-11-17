@@ -43,9 +43,23 @@ iOS 15 and later. Rootful jailbreaks are not planned for 1.0.
 
 ## Building
 
-Build instructions will be added with the hooking core. Release packages will
-be built on GitHub Actions, signed, and published with build provenance
-attestations.
+The hooking engine builds with `make` on macOS or Linux and runs its tests on
+arm64:
+
+```sh
+make          # build/libburrow.a
+make test     # all tests (arm64 macOS or Linux)
+```
+
+On another Linux machine, the tests can run under QEMU:
+
+```sh
+make test CC=aarch64-linux-gnu-gcc RUN="qemu-aarch64 -L /usr/aarch64-linux-gnu"
+```
+
+[docs/hooking.md](docs/hooking.md) explains how hooks are installed and which
+rules keep them safe. Release packages will be built on GitHub Actions,
+signed, and published with build provenance attestations.
 
 ## Contributing
 
