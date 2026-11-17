@@ -251,7 +251,7 @@ static void test_arguments(void) {
     CHECK(original == NULL);
     CHECK(burrow_hook_functions(NULL, 0, NULL) == BURROW_OK);
     CHECK(burrow_hook_functions(NULL, 1, NULL) == BURROW_ERR_INVALID_ARGUMENT);
-    for (int status = BURROW_OK; status <= BURROW_ERR_PROTECTION; status++) {
+    for (int status = BURROW_OK; status <= BURROW_ERR_NOT_FOUND; status++) {
         CHECK(strcmp(burrow_status_string((burrow_status)status), "unknown status") != 0);
     }
 }

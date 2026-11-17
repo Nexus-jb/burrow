@@ -110,6 +110,30 @@ in that window, and the protection changes use the Mach trap directly,
 without calling into `libsystem_kernel`, so a function that shares a page
 with `mach_vm_protect` can still be hooked.
 
+## Objective-C methods
+
+`burrow_hook_message` (in `burrow/objc.h`) hooks a method through the public
+Objective-C runtime API, like `MSHookMessageEx` in Substrate. For a class
+method, pass the metaclass.
+
+- **The class defines the method.** Its implementation is replaced with
+  `method_setImplementation`, and `original` receives the previous one.
+- **The class only inherits the method.** Burrow adds the method to the
+  class with `class_addMethod`, using the inherited method's type encoding.
+  `original` is then a stub that, on every call, looks up the superclass's
+  current implementation and jumps to it. A hook added to the superclass
+  later is therefore still reached, and calling `original` behaves like a
+  message to `super`.
+
+The stubs are built into the library (`src/objc_stubs.S`), 4096 of them,
+so hooking a method never generates code at run time. Each stub puts its
+number in `x16` and jumps to a common routine that saves `x0` to `x8` and
+`q0` to `q7`, asks the runtime for the implementation, restores them and
+jumps. Stack arguments are untouched, so methods of any signature work,
+including ones that return large structures. If a process uses all 4096,
+`original` falls back to the superclass's implementation at the time of the
+hook.
+
 ## Not supported yet
 
 - Pointer authentication on arm64e.
@@ -119,7 +143,7 @@ with `mach_vm_protect` can still be hooked.
 
 ## Testing
 
-`make test` runs two suites:
+`make test` runs these suites:
 
 - `tests/relocation_tests.c` checks decoding, encoding and relocation word by
   word. It runs on any host.
@@ -130,6 +154,10 @@ with `mach_vm_protect` can still be hooked.
   four-word patches, and both of those with trampolines more than 4 GiB away.
   If a hook crashes the process, it prints the mode and the test that was
   running.
+- `tests/objc_tests.c` builds classes at run time and hooks their methods:
+  defined and inherited methods, a superclass hooked after its subclass,
+  chains, class methods, and methods with structure returns, floating-point
+  arguments and stack arguments. It runs on macOS and iOS.
 
 Both suites also run on jailbroken iPhones. CI builds them into a rootless
 package, `com.nexusjb.burrow-tests` (or run `make ios-tests-package` with
@@ -141,3 +169,4 @@ Device results so far:
 | Device | Chip | iOS | Jailbreak | Build | Result |
 | ------ | ---- | --- | --------- | ----- | ------ |
 | iPhone 14 Pro Max | A16 (arm64 tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.8 | All suites passed |
+| iPhone 14 Pro Max | A16 (arm64 tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.12 | All suites passed, including Objective-C |

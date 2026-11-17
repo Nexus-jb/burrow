@@ -26,16 +26,19 @@ COMMON += -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame
 LDFLAGS += -fsanitize=address,undefined
 endif
 
-ifeq ($(shell uname -s),Darwin)
-PLATFORM := src/memory_darwin.c
-else
-PLATFORM := src/memory_linux.c
-LDLIBS += -pthread
-endif
-
 PORTABLE := src/arm64.c src/relocate.c src/memory_common.c
-LIBRARY := $(PORTABLE) src/hook.c $(PLATFORM)
-DARWIN_LIBRARY := $(PORTABLE) src/hook.c src/memory_darwin.c
+OBJC := src/objc.c src/objc_stubs.S
+DARWIN_LIBRARY := $(PORTABLE) src/hook.c src/memory_darwin.c $(OBJC)
+
+ifeq ($(shell uname -s),Darwin)
+LIBRARY := $(DARWIN_LIBRARY)
+LDLIBS += -lobjc
+OBJC_TESTS := $(BUILD)/objc-tests
+else
+LIBRARY := $(PORTABLE) src/hook.c src/memory_linux.c
+LDLIBS += -pthread
+OBJC_TESTS :=
+endif
 
 IOS_CC ?= xcrun --sdk iphoneos clang
 IOS_ARCH ?= arm64
@@ -56,7 +59,10 @@ $(BUILD)/lib:
 $(BUILD)/lib/%.o: src/%.c $(HEADERS) | $(BUILD)/lib
 	$(CC) $(COMMON) -fvisibility=hidden $(CFLAGS) -c $< -o $@
 
-$(BUILD)/libburrow.a: $(patsubst src/%.c,$(BUILD)/lib/%.o,$(LIBRARY))
+$(BUILD)/lib/%.o: src/%.S $(HEADERS) | $(BUILD)/lib
+	$(CC) $(COMMON) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/libburrow.a: $(patsubst src/%,$(BUILD)/lib/%.o,$(basename $(LIBRARY)))
 	$(AR) rcs $@ $^
 
 $(BUILD)/relocation-tests: tests/relocation_tests.c $(PORTABLE) $(HEADERS) | $(BUILD)/lib
@@ -68,21 +74,29 @@ $(BUILD)/hook-tests: tests/hook_tests.c tests/targets.S $(LIBRARY) $(HEADERS) | 
 test-relocation: $(BUILD)/relocation-tests
 	$(RUN) $(BUILD)/relocation-tests
 
-test: test-relocation $(BUILD)/hook-tests
+$(BUILD)/objc-tests: tests/objc_tests.c $(LIBRARY) $(HEADERS) | $(BUILD)/lib
+	$(CC) $(COMMON) $(CFLAGS) tests/objc_tests.c $(LIBRARY) -o $@ $(LDFLAGS) $(LDLIBS)
+
+test: test-relocation $(BUILD)/hook-tests $(OBJC_TESTS)
 	@for mode in $(MODES); do $(RUN) $(BUILD)/hook-tests $$mode || exit 1; done
+	@for program in $(OBJC_TESTS); do $(RUN) $$program || exit 1; done
 
 $(IOS_BUILD):
 	mkdir -p $@
 
 $(IOS_BUILD)/hook-tests: tests/hook_tests.c tests/targets.S $(DARWIN_LIBRARY) $(HEADERS) tests/ios.entitlements | $(IOS_BUILD)
-	$(IOS_CC) $(IOS_FLAGS) $(COMMON) -DBURROW_TESTING $(CFLAGS) tests/hook_tests.c tests/targets.S $(DARWIN_LIBRARY) -o $@
+	$(IOS_CC) $(IOS_FLAGS) $(COMMON) -DBURROW_TESTING $(CFLAGS) tests/hook_tests.c tests/targets.S $(DARWIN_LIBRARY) -o $@ -lobjc
+	$(LDID) -Stests/ios.entitlements $@
+
+$(IOS_BUILD)/objc-tests: tests/objc_tests.c $(DARWIN_LIBRARY) $(HEADERS) tests/ios.entitlements | $(IOS_BUILD)
+	$(IOS_CC) $(IOS_FLAGS) $(COMMON) $(CFLAGS) tests/objc_tests.c $(DARWIN_LIBRARY) -o $@ -lobjc
 	$(LDID) -Stests/ios.entitlements $@
 
 $(IOS_BUILD)/relocation-tests: tests/relocation_tests.c $(PORTABLE) $(HEADERS) tests/ios.entitlements | $(IOS_BUILD)
 	$(IOS_CC) $(IOS_FLAGS) $(COMMON) $(CFLAGS) tests/relocation_tests.c $(PORTABLE) -o $@
 	$(LDID) -Stests/ios.entitlements $@
 
-ios-tests: $(IOS_BUILD)/hook-tests $(IOS_BUILD)/relocation-tests
+ios-tests: $(IOS_BUILD)/hook-tests $(IOS_BUILD)/relocation-tests $(IOS_BUILD)/objc-tests
 
 ios-tests-package: ios-tests
 	scripts/package-tests.sh $(IOS_BUILD) $(PACKAGE_VERSION) $(BUILD)/packages
