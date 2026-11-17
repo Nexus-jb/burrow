@@ -125,7 +125,7 @@ with `mach_vm_protect` can still be hooked.
   word. It runs on any host.
 - `tests/hook_tests.c` hooks real functions, written in assembly in
   `tests/targets.S`, and checks the results of the hooked and original
-  functions. It runs on arm64 Linux and macOS, once per mode: one-word
+  functions. It runs on arm64 Linux, macOS and iOS, once per mode: one-word
   patches straight to the replacement or through an island, three- and
   four-word patches, and both of those with trampolines more than 4 GiB away.
   If a hook crashes the process, it prints the mode and the test that was
@@ -135,3 +135,9 @@ Both suites also run on jailbroken iPhones. CI builds them into a rootless
 package, `com.nexusjb.burrow-tests` (or run `make ios-tests-package` with
 Xcode, ldid and dpkg installed). Install it, then run `burrow-tests` in a
 terminal.
+
+Device results so far:
+
+| Device | Chip | iOS | Jailbreak | Build | Result |
+| ------ | ---- | --- | --------- | ----- | ------ |
+| iPhone 14 Pro Max | A16 (arm64 tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.8 | All suites passed |
