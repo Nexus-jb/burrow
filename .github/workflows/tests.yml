@@ -55,3 +55,30 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: make test
+
+  ios-package:
+    name: iOS device test package
+    # Builds the tests for running on a jailbroken iPhone. The Intel image
+    # has the same iOS SDK and has had free runners more often.
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - run: brew install ldid dpkg
+      - name: Build and package
+        env:
+          VERSION: 0.0.0~dev.${{ github.run_number }}
+        run: make ios-tests-package PACKAGE_VERSION="$VERSION"
+      - name: Inspect the package
+        run: |
+          for deb in build/packages/*.deb; do
+            dpkg-deb --info "$deb"
+            dpkg-deb --contents "$deb"
+          done
+          ldid -e build/ios-arm64/hook-tests
+          lipo -info build/ios-arm64/hook-tests
+      - uses: actions/upload-artifact@v4
+        with:
+          name: burrow-tests-${{ github.run_number }}
+          path: build/packages/*.deb
+          if-no-files-found: error

@@ -6,6 +6,10 @@
 #
 # Cross-testing from another Linux machine:
 #   make test CC=aarch64-linux-gnu-gcc RUN="qemu-aarch64 -L /usr/aarch64-linux-gnu"
+#
+# Testing on a jailbroken device (needs Xcode, ldid and dpkg):
+#   make ios-tests-package PACKAGE_VERSION=0.0.0~dev.1
+# then install the package from build/packages and run "burrow-tests".
 
 CC ?= cc
 AR ?= ar
@@ -31,10 +35,18 @@ endif
 
 PORTABLE := src/arm64.c src/relocate.c src/memory_common.c
 LIBRARY := $(PORTABLE) src/hook.c $(PLATFORM)
+DARWIN_LIBRARY := $(PORTABLE) src/hook.c src/memory_darwin.c
+
+IOS_CC ?= xcrun --sdk iphoneos clang
+IOS_ARCH ?= arm64
+IOS_FLAGS := -arch $(IOS_ARCH) -mios-version-min=15.0
+IOS_BUILD := $(BUILD)/ios-$(IOS_ARCH)
+LDID ?= ldid
+PACKAGE_VERSION ?= 0.0.0~dev
 HEADERS := $(wildcard include/burrow/*.h src/*.h)
 MODES := direct island adrp abs adrp-far abs-far
 
-.PHONY: all test test-relocation clean
+.PHONY: all test test-relocation ios-tests ios-tests-package clean
 
 all: $(BUILD)/libburrow.a
 
@@ -58,6 +70,22 @@ test-relocation: $(BUILD)/relocation-tests
 
 test: test-relocation $(BUILD)/hook-tests
 	@for mode in $(MODES); do $(RUN) $(BUILD)/hook-tests $$mode || exit 1; done
+
+$(IOS_BUILD):
+	mkdir -p $@
+
+$(IOS_BUILD)/hook-tests: tests/hook_tests.c tests/targets.S $(DARWIN_LIBRARY) $(HEADERS) tests/ios.entitlements | $(IOS_BUILD)
+	$(IOS_CC) $(IOS_FLAGS) $(COMMON) -DBURROW_TESTING $(CFLAGS) tests/hook_tests.c tests/targets.S $(DARWIN_LIBRARY) -o $@
+	$(LDID) -Stests/ios.entitlements $@
+
+$(IOS_BUILD)/relocation-tests: tests/relocation_tests.c $(PORTABLE) $(HEADERS) tests/ios.entitlements | $(IOS_BUILD)
+	$(IOS_CC) $(IOS_FLAGS) $(COMMON) $(CFLAGS) tests/relocation_tests.c $(PORTABLE) -o $@
+	$(LDID) -Stests/ios.entitlements $@
+
+ios-tests: $(IOS_BUILD)/hook-tests $(IOS_BUILD)/relocation-tests
+
+ios-tests-package: ios-tests
+	scripts/package-tests.sh $(IOS_BUILD) $(PACKAGE_VERSION) $(BUILD)/packages
 
 clean:
 	rm -rf $(BUILD)
