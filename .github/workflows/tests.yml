@@ -43,9 +43,11 @@ jobs:
 
   macos:
     name: macOS arm64 (${{ matrix.image }})
-    # The free arm64 macOS runners for public repositories are often at
-    # capacity, so the tests run on two images and any one of them is
-    # enough to check the Darwin backend.
+    # The free arm64 macOS runners for public repositories have been at
+    # capacity for days and drop queued jobs, so this job runs only when
+    # started by hand. The Darwin backend is built by the iOS package job
+    # below and tested on jailbroken iPhones with that package.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ${{ matrix.image }}
     timeout-minutes: 30
     strategy:
