@@ -14,8 +14,6 @@
 
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
-#include <mach-o/loader.h>
-#include <mach-o/nlist.h>
 #include <objc/message.h>
 #include <objc/runtime.h>
 #include <stdbool.h>
@@ -101,46 +99,6 @@ static uintptr_t code(const void *pointer) {
     return burrow_code_address(pointer);
 }
 
-// Prints what this program's own symbol table holds for `name`, to tell a
-// lookup bug from a missing symbol when a check fails.
-static void describe_symbol(const char *name) {
-    const struct mach_header_64 *header = (const struct mach_header_64 *)_dyld_get_image_header(0);
-    intptr_t slide = _dyld_get_image_vmaddr_slide(0);
-    const struct symtab_command *symtab = NULL;
-    const struct segment_command_64 *linkedit = NULL;
-    const uint8_t *cursor = (const uint8_t *)(header + 1);
-    for (uint32_t i = 0; i < header->ncmds; i++) {
-        const struct load_command *command = (const struct load_command *)cursor;
-        if (command->cmd == LC_SYMTAB) {
-            symtab = (const struct symtab_command *)command;
-        } else if (command->cmd == LC_SEGMENT_64) {
-            const struct segment_command_64 *segment = (const struct segment_command_64 *)command;
-            fprintf(stderr, "[substrate]   segment %.16s vmaddr %llx fileoff %llx\n", segment->segname,
-                    (unsigned long long)segment->vmaddr, (unsigned long long)segment->fileoff);
-            if (strncmp(segment->segname, SEG_LINKEDIT, sizeof segment->segname) == 0) {
-                linkedit = segment;
-            }
-        }
-        cursor += command->cmdsize;
-    }
-    fprintf(stderr, "[substrate]   magic %x ncmds %u slide %lx symtab %p linkedit %p\n", header->magic,
-            header->ncmds, (unsigned long)slide, (const void *)symtab, (const void *)linkedit);
-    if (!symtab || !linkedit) {
-        return;
-    }
-    uintptr_t base = (uintptr_t)(linkedit->vmaddr + (uint64_t)slide - linkedit->fileoff);
-    const struct nlist_64 *symbols = (const struct nlist_64 *)(base + symtab->symoff);
-    const char *strings = (const char *)(base + symtab->stroff);
-    fprintf(stderr, "[substrate]   nsyms %u strsize %u\n", symtab->nsyms, symtab->strsize);
-    for (uint32_t i = 0; i < symtab->nsyms; i++) {
-        uint32_t offset = symbols[i].n_un.n_strx;
-        if (offset && offset < symtab->strsize && strstr(strings + offset, name + 1)) {
-            fprintf(stderr, "[substrate]   symbol %u %s type %x sect %u value %llx\n", i, strings + offset,
-                    symbols[i].n_type, symbols[i].n_sect, (unsigned long long)symbols[i].n_value);
-        }
-    }
-}
-
 int main(int argc, char **argv) {
     if (argc != 2) {
         fprintf(stderr, "usage: %s <tweak.dylib>\n", argv[0]);
@@ -211,16 +169,16 @@ int main(int argc, char **argv) {
     CHECK(send_int((id)child, class_value) == 203);
 
     current = "MSFindSymbol";
-    const char *self_path = _dyld_get_image_name(0);
+    // Under Dopamine, dyld's image 0 is not always the main executable, so
+    // the program finds its own image through one of its functions.
+    Dl_info self_info;
+    CHECK(dladdr((const void *)code((const void *)burrow_local_function), &self_info) && self_info.dli_fname);
+    const char *self_path = self_info.dli_fname;
     MSImageRef self_image = MSGetImageByName_fn(self_path);
-    CHECK(self_image == (MSImageRef)_dyld_get_image_header(0));
+    CHECK(self_image && self_image == (MSImageRef)self_info.dli_fbase);
     CHECK(code(MSFindSymbol_fn(NULL, "_burrow_sample_target")) == code((const void *)burrow_sample_target));
     void *local = MSFindSymbol_fn(self_image, "_burrow_local_function");
     CHECK(local && code(local) == code((const void *)burrow_local_function));
-    if (!local || code(local) != code((const void *)burrow_local_function)) {
-        fprintf(stderr, "[substrate]   found %p, function at %p\n", local, (const void *)burrow_local_function);
-        describe_symbol("_burrow_local_function");
-    }
     CHECK(local && ((int (*)(int))local)(1) == 10);
     CHECK(MSFindSymbol_fn(self_image, "_burrow_no_such_symbol") == NULL);
     CHECK(MSGetImageByName_fn("/burrow/no/such/image") == NULL);
