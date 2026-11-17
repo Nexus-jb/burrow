@@ -1,0 +1,130 @@
+# How function hooking works
+
+This page describes Burrow's hooking engine: how a hook is installed and
+which rules keep it safe. The code is in `src/hook.c` (choosing and writing
+patches), `src/relocate.c` (moving instructions) and `src/memory_*.c`
+(platform memory primitives).
+
+## Overview
+
+To hook a function, Burrow overwrites its first instructions with a branch
+to the replacement. The overwritten instructions are copied into a
+*trampoline*, followed by a branch back to the rest of the function. Calling
+the trampoline therefore runs the original function; it is what the
+`original` pointer receives.
+
+```
+target:      B replacement          trampoline:  <first instruction, moved>
+             <rest of the function>              B target + 4
+```
+
+## Patches
+
+Burrow picks the smallest patch that is safe, in this order:
+
+| Words | Patch | When |
+| ----- | ----- | ---- |
+| 1 | `B replacement` | The replacement is within 128 MiB of the target. |
+| 1 | `B island` | An *island* (a small absolute jump) can be placed within 128 MiB. |
+| 3 | `ADRP x, page; ADD x, x, offset; BR x` | The replacement, or an island, is within 4 GiB. |
+| 4 | `LDR x, #8; BR x; .quad replacement` | Always possible if the function is long enough. |
+
+The one-word patch is preferred because it replaces a single instruction
+with a single aligned store, and because it moves the fewest instructions.
+
+The multi-word patches use `x17` or `x16` as a scratch register. These are
+the intra-procedure-call registers, which a caller cannot expect to survive
+a call. If the instructions being replaced use one of them, Burrow uses the
+other. If they use both, only the one-word patch is possible.
+
+## When a patch is refused
+
+A hook that cannot be installed safely fails with `BURROW_ERR_UNSUPPORTED`
+and leaves the target untouched. A patch of a given size is refused when:
+
+- **The function is shorter than the patch.** If a replaced instruction
+  never continues (`B`, `BR`, `RET`, `BRK`...), the words after it may belong
+  to another function, or may be where another hooking library's trampoline
+  returns to. Nothing may follow such an instruction inside the patch.
+- **Code branches into the patch.** Burrow scans the 64 instructions after
+  the target for direct branches into the second, third or fourth word. Such
+  a branch would land in the middle of the patch.
+- **A replaced instruction branches forward into the patch.** A branch back
+  to an earlier replaced instruction is redirected into the trampoline; a
+  branch forward cannot be.
+- **A literal straddles the patch.** A literal that lies wholly inside the
+  patch is copied into the trampoline. One that lies partly outside cannot
+  be.
+- **A replaced instruction is unallocated or a system instruction.**
+
+## Moving instructions
+
+Most instructions are copied unchanged. Those that refer to the program
+counter are rewritten for the trampoline's address:
+
+| Instruction | In range of the trampoline | Out of range |
+| ----------- | -------------------------- | ------------ |
+| `B` | `B` | `MOV x, target; BR x` |
+| `BL` | `BL` | `MOV x, target; BLR x` |
+| `B.cond`, `CBZ`, `CBNZ`, `TBZ`, `TBNZ` | re-encoded | inverted condition skipping a full jump |
+| `ADR` | `ADR` | `MOV xd, address` |
+| `ADRP` | `ADRP` | `MOV xd, page` |
+| `LDR`, `LDRSW` (literal) | re-encoded | `MOV xt, address; LDR xt, [xt]` |
+| `LDR` (literal, SIMD&FP) | re-encoded | `MOV x, address; LDR qt, [x]` |
+| `PRFM` (literal) | re-encoded | dropped (it is only a hint) |
+
+`MOV x, value` stands for a `MOVZ` followed by a `MOVK` for each non-zero
+16-bit part.
+
+## Hooking a function twice
+
+When a function is hooked again, by Burrow or by another library, its first
+words are the previous patch. They are moved like any other instructions:
+a `B` is relocated, and the four-word absolute jump that most hooking
+libraries write (`LDR Xn, #8; BR Xn; .quad`) is recognized and moved as one
+jump. The new hook runs first and reaches the previous one through its
+`original` pointer.
+
+## Batches
+
+`burrow_hook_functions` installs a batch of hooks all or nothing. It plans
+every hook first, then makes the trampolines executable, sets every
+`original` pointer, and only then writes the patches. If writing a patch
+fails, the patches already written are restored.
+
+Trampolines are allocated in pages per batch, near their targets when
+possible. Once a batch's pages are executable they are never written again,
+so a page is never non-executable while another thread may be running a
+trampoline in it. Trampoline memory is never freed, because a thread may be
+inside a trampoline at any time.
+
+## Writing code on iOS
+
+On iOS a page cannot be writable and executable at once. To patch a function,
+Burrow makes its page writable with `VM_PROT_COPY` (the process gets a
+private copy of the page), writes the patch, and restores the protection.
+The jailbreak is what allows the modified page to run.
+
+While the page is writable it is not executable. Only Burrow's own code runs
+in that window, and the protection changes use the Mach trap directly,
+without calling into `libsystem_kernel`, so a function that shares a page
+with `mach_vm_protect` can still be hooked.
+
+## Not supported yet
+
+- Pointer authentication on arm64e.
+- Removing hooks.
+- Suspending other threads while code is patched. Hooks are normally
+  installed while a tweak loads, before the process starts other work.
+
+## Testing
+
+`make test` runs two suites:
+
+- `tests/relocation_tests.c` checks decoding, encoding and relocation word by
+  word. It runs on any host.
+- `tests/hook_tests.c` hooks real functions, written in assembly in
+  `tests/targets.S`, and checks the results of the hooked and original
+  functions. It runs on arm64 Linux and macOS, once per mode: one-word
+  patches straight to the replacement or through an island, three- and
+  four-word patches, and both of those with trampolines more than 4 GiB away.

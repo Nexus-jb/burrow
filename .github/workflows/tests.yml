@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  relocation:
+    name: Relocation unit tests (x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: make test-relocation
+      - run: make test-relocation BUILD=build/sanitized SANITIZE=1
+
+  linux-arm64:
+    name: Linux arm64 (${{ matrix.name }})
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: clang, cc: clang, sanitize: "0" }
+          - { name: gcc, cc: gcc, sanitize: "0" }
+          - { name: sanitizers, cc: clang, sanitize: "1" }
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run all tests
+        env:
+          CC: ${{ matrix.cc }}
+          SANITIZE: ${{ matrix.sanitize }}
+        run: make test CC="$CC" SANITIZE="$SANITIZE"
+
+  macos:
+    name: macOS arm64
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - run: make test
