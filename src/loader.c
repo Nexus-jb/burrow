@@ -551,9 +551,10 @@ static bool should_load(const char *directory, const char *name, CFDictionaryRef
 
 // The loader's message for crash reports (see loader_annotation.h). Only the
 // loader's constructor writes it, on one thread. Volatile: nothing in this
-// file reads it back, but crash reporters read it from outside.
-__attribute__((used, section("__DATA,__crash_info"))) static volatile struct burrow_crash_annotations
-    crash_annotations = { .version = BURROW_CRASH_ANNOTATIONS_VERSION };
+// file reads it back, but crash reporters read it from outside. Crash
+// reporters find it under the name that Apple's own libraries give it.
+__attribute__((used, visibility("default"), section("__DATA,__crash_info"))) volatile struct burrow_crash_annotations
+    gCRAnnotations = { .version = BURROW_CRASH_ANNOTATIONS_VERSION };
 static char loading_message[sizeof BURROW_LOADING_PREFIX + MAX_NAME_LENGTH];
 
 static void open_tweak(const char *directory, const char *name) {
@@ -565,9 +566,9 @@ static void open_tweak(const char *directory, const char *name) {
     // Named in crash reports until dlopen returns: a crash in between, in
     // the tweak's constructor or before it, is the tweak's.
     snprintf(loading_message, sizeof loading_message, "%s%s", BURROW_LOADING_PREFIX, name);
-    crash_annotations.message = (uint64_t)(uintptr_t)loading_message;
+    gCRAnnotations.message = (uint64_t)(uintptr_t)loading_message;
     void *handle = dlopen(path, RTLD_LAZY | RTLD_GLOBAL);
-    crash_annotations.message = 0;
+    gCRAnnotations.message = 0;
     if (handle) {
         os_log_info(OS_LOG_DEFAULT, "Burrow: loaded %{public}s", name);
     } else {
