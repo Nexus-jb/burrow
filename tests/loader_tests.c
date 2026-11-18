@@ -34,7 +34,7 @@ extern char **environ;
 // LoaderTarget has the bundle identifier com.nexusjb.burrow-tests.loader-target.
 // zManager is a tweak manager: it loads first, though its name sorts last.
 #define PLAIN_ALL "zManager 000First AnyMode ClassFilter Executable NewCF OpenStep"
-#define APP_ALL "zManager 000First AllFilters AppBundle NewCF"
+#define APP_ALL "zManager 000First AppBundle EitherKey LowercaseBundle NewCF"
 
 struct settings_case {
     const char *name;
@@ -53,7 +53,7 @@ static const struct settings_case CASES[] = {
     { "empty settings", "<dict/>", true, NULL, PLAIN_ALL, APP_ALL },
     { "off everywhere",
       "<dict><key>DisabledTweaks</key><array><string>NewCF</string></array></dict>", true, NULL,
-      "zManager 000First AnyMode ClassFilter Executable OpenStep", "zManager 000First AllFilters AppBundle" },
+      "zManager 000First AnyMode ClassFilter Executable OpenStep", "zManager 000First AppBundle EitherKey LowercaseBundle" },
     { "off by executable name",
       "<dict><key>DisabledInProcesses</key><dict><key>loader-target</key>"
       "<array><string>Executable</string><string>OpenStep</string></array></dict></dict>",
@@ -65,12 +65,12 @@ static const struct settings_case CASES[] = {
     { "off by app executable name",
       "<dict><key>DisabledInProcesses</key><dict><key>LoaderTarget</key>"
       "<array><string>AppBundle</string></array></dict></dict>",
-      true, NULL, PLAIN_ALL, "zManager 000First AllFilters NewCF" },
+      true, NULL, PLAIN_ALL, "zManager 000First EitherKey LowercaseBundle NewCF" },
     // A tweak manager alone is not loaded.
     { "only the tweak manager left",
       "<dict><key>DisabledInProcesses</key><dict><key>LoaderTarget</key>"
-      "<array><string>000First</string><string>AllFilters</string><string>AppBundle</string>"
-      "<string>NewCF</string><string>Broken</string></array></dict></dict>",
+      "<array><string>000First</string><string>AppBundle</string><string>EitherKey</string>"
+      "<string>LowercaseBundle</string><string>NewCF</string><string>Broken</string></array></dict></dict>",
       true, NULL, PLAIN_ALL, "" },
     // The Substrate safe mode variables load nothing.
     { "_MSSafeMode", NULL, false, "_MSSafeMode=1", "", "" },

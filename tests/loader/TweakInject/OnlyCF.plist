@@ -5,13 +5,9 @@
 <dict>
 	<key>Filter</key>
 	<dict>
-		<key>Bundles</key>
+		<key>CoreFoundationVersion</key>
 		<array>
-			<string>com.nexusjb.no-such-bundle</string>
-		</array>
-		<key>Executables</key>
-		<array>
-			<string>loader-target</string>
+			<real>1000</real>
 		</array>
 	</dict>
 </dict>

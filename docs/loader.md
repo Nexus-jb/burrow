@@ -17,18 +17,26 @@ OpenStep. Its `Filter` dictionary can hold:
 
 | Key | Matches when |
 | --- | ------------ |
-| `Bundles` | a bundle with one of these identifiers is loaded: the app itself or a framework it uses, such as `com.apple.UIKit` |
+| `Bundles` | a bundle with one of these identifiers, or the identifier in lower case, is loaded: the app itself or a framework it uses, such as `com.apple.UIKit` |
 | `Executables` | the last component of the executable's path is one of these names |
 | `Classes` | one of these Objective-C classes exists in the process |
 | `CoreFoundationVersion` | `kCFCoreFoundationVersionNumber` is at least the first number and, if there is a second, below it |
 
-Within one key, any entry may match. By default every key that is present
-must match. With `Mode` set to `Any`, one matching key is enough.
+Within one key, any entry may match. The keys combine the way ElleKit, the
+tweak loader that rootless tweaks are made and tested with, combines them:
+
+- `CoreFoundationVersion`, when present, must match;
+- then any one of `Bundles`, `Classes` and `Executables` is enough.
+
+Cydia Substrate documented that every key present must match unless `Mode`
+is `Any`. Burrow follows ElleKit instead, so that tweaks load where they load
+today. `Mode` is accepted and changes nothing.
 
 A tweak is not loaded when:
 
 - it has no filter, or its filter cannot be read;
-- its `Filter` dictionary has none of the keys above;
+- its `Filter` dictionary has none of `Bundles`, `Classes` and
+  `Executables`, even if it has `CoreFoundationVersion`, as in ElleKit;
 - the library cannot be loaded. The loader logs the reason and goes on with
   the next tweak.
 
@@ -99,7 +107,7 @@ the loader returns before it reads any property list.
 
 `make test-loader` (macOS) and the device package run `tests/loader_tests.c`.
 `scripts/build-loader-tests.sh` builds a test set: a test build of the
-loader that takes its paths from the environment, fifteen test tweaks with
+loader that takes its paths from the environment, seventeen test tweaks with
 filters from `tests/loader/TweakInject`, and two targets:
 
 - `loader-target`: no bundle, the Objective-C class `BurrowLoaderPlainClass`,
@@ -112,8 +120,10 @@ Each test tweak tells the target when its constructor runs. The test program
 runs both targets under eleven settings files and the two safe mode
 variables, and checks which tweaks loaded and in what order. Among the test tweaks are one with no filter, one with an
 unreadable filter, one with an empty filter, one that is not a library, a
-tweak manager whose name sorts last, and filters in OpenStep format and
-with `Mode` set to `Any`.
+tweak manager whose name sorts last, a filter matched by either of two
+keys, a bundle identifier in another case, a filter with only
+`CoreFoundationVersion`, and filters in OpenStep format and with `Mode` set
+to `Any`.
 
 Device results:
 

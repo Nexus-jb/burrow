@@ -7,7 +7,7 @@
 	<dict>
 		<key>Bundles</key>
 		<array>
-			<string>com.apple.CoreFoundation</string>
+			<string>com.nexusjb.no-such-bundle</string>
 		</array>
 		<key>Executables</key>
 		<array>

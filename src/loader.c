@@ -4,10 +4,11 @@
 // from the tweak directory whose filter matches the process, unless the
 // user has turned that tweak off for the process.
 //
-// Filters follow the documented Cydia Substrate format: foo.plist beside
-// foo.dylib holds a dictionary whose Filter key lists the bundles, classes,
-// executables and CoreFoundation versions the tweak is meant for. A tweak
-// without a filter is not loaded. A tweak whose property list sets
+// Filters use the Cydia Substrate format: foo.plist beside foo.dylib holds
+// a dictionary whose Filter key lists the bundles, classes, executables and
+// CoreFoundation versions the tweak is meant for. They are combined the way
+// ElleKit combines them, since rootless tweaks are made and tested with
+// it. A tweak without a filter is not loaded. A tweak whose property list sets
 // IsTweakManager, such as one that turns tweaks off per app, is loaded
 // before every other tweak, and only when another tweak is loaded too.
 
@@ -282,7 +283,7 @@ static bool core_foundation_came_first(void) {
     return false;
 }
 
-static bool bundle_loaded(CFStringRef identifier, struct process *process) {
+static bool bundle_loaded_exactly(CFStringRef identifier, struct process *process) {
     if (process->bundle_identifier && CFEqual(identifier, process->bundle_identifier)) {
         return true;
     }
@@ -293,6 +294,22 @@ static bool bundle_loaded(CFStringRef identifier, struct process *process) {
         process->loaded_bundles = read_loaded_bundles();
     }
     return process->loaded_bundles && CFSetContainsValue(process->loaded_bundles, identifier);
+}
+
+// As in ElleKit, an identifier also matches in lower case, so a filter
+// for com.apple.SpringBoard finds com.apple.springboard.
+static bool bundle_loaded(CFStringRef identifier, struct process *process) {
+    if (bundle_loaded_exactly(identifier, process)) {
+        return true;
+    }
+    CFMutableStringRef lower = CFStringCreateMutableCopy(kCFAllocatorDefault, 0, identifier);
+    if (!lower) {
+        return false;
+    }
+    CFStringLowercase(lower, NULL);
+    bool found = !CFEqual(lower, identifier) && bundle_loaded_exactly(lower, process);
+    CFRelease(lower);
+    return found;
 }
 
 // A bundle matches when it is loaded in the process: the app itself or any
@@ -308,38 +325,31 @@ static bool bundles_match(CFArrayRef bundles, struct process *process) {
     return false;
 }
 
-// By default every kind of filter present must match. With Mode set to
-// "Any", one matching kind is enough. A filter with none of these kinds
-// matches nothing.
+// The keys combine as in ElleKit: CoreFoundationVersion, when present,
+// must match; then any one of Executables, Classes and Bundles is enough.
+// Mode is accepted and changes nothing, since one key is always enough. A
+// filter with none of those three keys matches nothing.
 static bool filter_matches(CFDictionaryRef filter, struct process *process) {
+    CFTypeRef versions = CFDictionaryGetValue(filter, CFSTR("CoreFoundationVersion"));
+    if (versions && !(is_array(versions) && core_foundation_matches((CFArrayRef)versions, process))) {
+        return false;
+    }
     const struct {
         CFStringRef key;
         bool (*matches)(CFArrayRef, struct process *);
     } kinds[] = {
         // The cheapest checks first.
-        { CFSTR("CoreFoundationVersion"), core_foundation_matches },
         { CFSTR("Executables"), executables_match },
         { CFSTR("Classes"), classes_match },
         { CFSTR("Bundles"), bundles_match },
     };
-    CFTypeRef mode = CFDictionaryGetValue(filter, CFSTR("Mode"));
-    bool any = is_string(mode) && CFEqual(mode, CFSTR("Any"));
-    bool present = false;
     for (size_t i = 0; i < sizeof kinds / sizeof kinds[0]; i++) {
         CFTypeRef value = CFDictionaryGetValue(filter, kinds[i].key);
-        if (!value) {
-            continue;
-        }
-        present = true;
-        bool matched = is_array(value) && kinds[i].matches((CFArrayRef)value, process);
-        if (any && matched) {
+        if (value && is_array(value) && kinds[i].matches((CFArrayRef)value, process)) {
             return true;
         }
-        if (!any && !matched) {
-            return false;
-        }
     }
-    return present && !any;
+    return false;
 }
 
 static bool tweak_matches(const char *filter_path, const char *name, struct process *process, bool *manager) {
