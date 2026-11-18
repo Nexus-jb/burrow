@@ -638,6 +638,20 @@ static void crash_and_check(BurrowSafeMode *safe_mode, BurrowCrashLog *log, NSSt
     // the loader opened it, after Innocent.
     CHECK([report.burrowLoadingTweak isEqualToString:tweak]);
     CHECK([report.burrowLoadedTweaks isEqualToArray:@[ @"Innocent" ]]);
+    if (![report.burrowLoadingTweak isEqualToString:tweak]) {
+        // Show what the crash reporter wrote instead.
+        NSString *text = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL];
+        NSRange newline = [text rangeOfString:@"\n"];
+        NSDictionary *body = newline.location == NSNotFound
+                                 ? nil
+                                 : [NSJSONSerialization JSONObjectWithData:[[text substringFromIndex:NSMaxRange(newline)]
+                                                                              dataUsingEncoding:NSUTF8StringEncoding]
+                                                                  options:0
+                                                                    error:NULL];
+        fprintf(stderr, "[safemode]   asi %s\n", [body[@"asi"] description].UTF8String ?: "(none)");
+        fprintf(stderr, "[safemode]   keys %s\n", [[body allKeys] componentsJoinedByString:@" "].UTF8String ?: "(none)");
+        fprintf(stderr, "[safemode]   note in file: %s\n", [text containsString:@"Burrow loaded"] ? "yes" : "no");
+    }
     BurrowSafeModeAction action = BurrowSafeModeIgnored;
     NSDictionary *event = nil;
     NSError *error = nil;
