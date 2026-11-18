@@ -8,8 +8,10 @@
 //   burrowctl events          what Safe Mode turned off, and why
 //   burrowctl loaded NAME     the tweak loader, hooking engine and tweaks in
 //                             the running processes called NAME (as root)
-//   burrowctl check           the tweaks that need the old arm64e ABI shim,
-//                             and whether it is installed
+//   burrowctl check           the tweaks that need the old arm64e ABI shim and
+//                             whether it is installed, the tweaks no loader
+//                             loads for their version range, and the tweak
+//                             managers
 //   burrowctl why NAME|FILE   the newest crash report of the process NAME, or
 //                             the report FILE: what happened, and where
 //   burrowctl loader burrow   make Burrow's loader the system's tweak loader
@@ -238,6 +240,8 @@ static int check(BurrowServicePaths *paths) {
     NSFileManager *files = [NSFileManager defaultManager];
     NSString *directory = paths.tweakDirectories.firstObject;
     NSMutableArray<NSString *> *old = [NSMutableArray array];
+    NSMutableArray<NSString *> *ranges = [NSMutableArray array];
+    NSMutableArray<NSString *> *managers = [NSMutableArray array];
     NSUInteger count = 0;
     for (NSString *name in [[files contentsOfDirectoryAtPath:directory error:NULL]
              sortedArrayUsingSelector:@selector(compare:)]) {
@@ -245,14 +249,30 @@ static int check(BurrowServicePaths *paths) {
             continue;
         }
         count++;
+        NSString *tweak = name.stringByDeletingPathExtension;
         if ([BurrowArm64eABI([directory stringByAppendingPathComponent:name]) isEqualToString:@"old"]) {
-            [old addObject:name.stringByDeletingPathExtension];
+            [old addObject:tweak];
+        }
+        NSDictionary *plist = [NSDictionary
+            dictionaryWithContentsOfFile:[directory stringByAppendingPathComponent:[tweak stringByAppendingPathExtension:@"plist"]]];
+        id filter = [plist isKindOfClass:[NSDictionary class]] ? plist[@"Filter"] : nil;
+        id versions = [filter isKindOfClass:[NSDictionary class]] ? filter[@"CoreFoundationVersion"] : nil;
+        if ([versions isKindOfClass:[NSArray class]] && [versions count] == 2 &&
+            [[versions firstObject] isKindOfClass:[NSNumber class]]) {
+            [ranges addObject:tweak];
+        }
+        id manager = plist[@"IsTweakManager"];
+        if ([manager isKindOfClass:[NSNumber class]] && [manager boolValue]) {
+            [managers addObject:tweak];
         }
     }
     BOOL shim = [files fileExistsAtPath:OldABIShim];
     print([NSString stringWithFormat:@"Tweaks:          %lu in %@", (unsigned long)count, directory]);
     print([NSString stringWithFormat:@"Old arm64e ABI:  %@", old.count ? [old componentsJoinedByString:@", "] : @"none"]);
     print([NSString stringWithFormat:@"OldABI shim:     %@", shim ? @"installed" : @"not installed"]);
+    print([NSString stringWithFormat:@"Version range:   %@ (never loaded, as with ElleKit)",
+                                     ranges.count ? [ranges componentsJoinedByString:@", "] : @"none"]);
+    print([NSString stringWithFormat:@"Tweak managers:  %@", managers.count ? [managers componentsJoinedByString:@", "] : @"none"]);
     if (old.count && !shim) {
         print(@"Tweaks with the old arm64e ABI crash arm64e processes without the shim.");
         return 1;

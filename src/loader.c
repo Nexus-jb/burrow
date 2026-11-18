@@ -135,23 +135,22 @@ static CFPropertyListRef read_property_list(const char *path, int *error) {
 
 static bool core_foundation_matches(CFArrayRef bounds, struct process *process) {
     (void)process;
-    // One or two numbers: the version must be at least the first and, when
-    // there is a second, below it.
+    // As ElleKit's loader treats the key, so that switching loaders changes
+    // nothing about which tweaks load. One number: the version must be at
+    // least that number. Two numbers, the first a number: ElleKit's loader
+    // never loads the tweak, so no tweak with such a filter has run under
+    // it; Burrow's loader does not load it either. Anything else sets no
+    // condition.
     CFIndex count = CFArrayGetCount(bounds);
-    if (count == 0) {
-        return false;
+    if (count != 1 && count != 2) {
+        return true;
     }
-    for (CFIndex i = 0; i < count && i < 2; i++) {
-        CFTypeRef item = CFArrayGetValueAtIndex(bounds, i);
-        double bound;
-        if (!has_type(item, CFNumberGetTypeID()) || !CFNumberGetValue((CFNumberRef)item, kCFNumberDoubleType, &bound)) {
-            return false;
-        }
-        if (i == 0 ? kCFCoreFoundationVersionNumber < bound : kCFCoreFoundationVersionNumber >= bound) {
-            return false;
-        }
+    CFTypeRef first = CFArrayGetValueAtIndex(bounds, 0);
+    double bound;
+    if (!has_type(first, CFNumberGetTypeID()) || !CFNumberGetValue((CFNumberRef)first, kCFNumberDoubleType, &bound)) {
+        return true;
     }
-    return true;
+    return count == 1 && kCFCoreFoundationVersionNumber >= bound;
 }
 
 static bool executables_match(CFArrayRef executables, struct process *process) {

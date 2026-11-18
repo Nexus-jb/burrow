@@ -20,7 +20,7 @@ OpenStep. Its `Filter` dictionary can hold:
 | `Bundles` | a bundle with one of these identifiers, or the identifier in lower case, is loaded: the app itself or a framework it uses, such as `com.apple.UIKit` |
 | `Executables` | the last component of the executable's path is one of these names |
 | `Classes` | one of these Objective-C classes exists in the process |
-| `CoreFoundationVersion` | `kCFCoreFoundationVersionNumber` is at least the first number and, if there is a second, below it |
+| `CoreFoundationVersion` | one number: `kCFCoreFoundationVersionNumber` is at least that number; two numbers: never (see below) |
 
 Within one key, any entry may match. The keys combine the way ElleKit, the
 tweak loader that rootless tweaks are made and tested with, combines them:
@@ -37,8 +37,22 @@ A tweak is not loaded when:
 - it has no filter, or its filter cannot be read;
 - its `Filter` dictionary has none of `Bundles`, `Classes` and
   `Executables`, even if it has `CoreFoundationVersion`, as in ElleKit;
+- its `CoreFoundationVersion` holds two numbers. Cydia Substrate documented
+  them as a range, but ElleKit's loader never loads such a tweak, so none
+  of them has run on a jailbreak that uses ElleKit. Burrow does the same, so
+  that switching loaders does not start loading untested tweaks. Any other
+  `CoreFoundationVersion` that is not one number sets no condition, as in
+  ElleKit;
 - the library cannot be loaded. The loader logs the reason and goes on with
   the next tweak.
+
+Before the first tweak that is not a tweak manager, the loader opens
+`/var/jb/usr/lib/ellekit/OldABI.dylib` when it is installed, as ElleKit's
+loader does. Tweaks built for arm64e with the ABI from before iOS 14 crash
+without it, in the Objective-C runtime, while they are loaded. Tweaks are
+opened with `RTLD_LAZY`, the mode ElleKit's loader uses.
+`burrowctl check` lists the tweaks with the old ABI and with two
+`CoreFoundationVersion` numbers.
 
 Tweaks are loaded in the order of their names, compared byte by byte, so
 `000First.dylib` loads before `Alpha.dylib`. Files whose names start with a
@@ -122,7 +136,8 @@ variables, and checks which tweaks loaded and in what order. Among the test twea
 unreadable filter, one with an empty filter, one that is not a library, a
 tweak manager whose name sorts last, a filter matched by either of two
 keys, a bundle identifier in another case, a filter with only
-`CoreFoundationVersion`, and filters in OpenStep format and with `Mode` set
+`CoreFoundationVersion`, one with a `CoreFoundationVersion` range that
+includes the running version, a stand-in for the old ABI shim, and filters in OpenStep format and with `Mode` set
 to `Any`.
 
 Device results:
