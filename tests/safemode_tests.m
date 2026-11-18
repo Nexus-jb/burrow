@@ -294,12 +294,10 @@ static void crash_and_check(BurrowSafeMode *safe_mode, NSString *target, NSStrin
                         image.uuid.UUIDString.UTF8String ?: "(no uuid)");
             }
         }
-        NSUInteger shown = 0;
+        fprintf(stderr, "[safemode]   exception %s, %lu exception frames\n",
+                report.uncaughtExceptionName.UTF8String ?: "(none)", (unsigned long)report.lastExceptionFrames.count);
         for (BurrowCrashFrame *frame in report.crashedThreadFrames) {
-            if (shown++ == 4) {
-                break;
-            }
-            fprintf(stderr, "[safemode]   frame %s %s\n", frame.image.path.UTF8String ?: "(none)", frame.symbol.UTF8String ?: "");
+            fprintf(stderr, "[safemode]   frame %s %s\n", frame.image.name.UTF8String ?: "(none)", frame.symbol.UTF8String ?: "");
         }
     }
     // The report was made by this test; leave no trace of it.
