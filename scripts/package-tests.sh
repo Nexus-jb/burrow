@@ -85,6 +85,8 @@ for arch in arm64 arm64e; do
     run "$dir/substrate-tests" /var/jb/usr/libexec/burrow-tests/BurrowSampleTweak.dylib
     unset DYLD_FRAMEWORK_PATH
     run "$dir/loader/loader-tests" "$dir/loader"
+    # Crashes a test program on purpose and reads the crash reports.
+    run "$dir/loader/safemode-tests" "$dir/loader"
 done
 if [ "$failed" -eq 0 ]; then
     echo "Burrow tests: all passed"

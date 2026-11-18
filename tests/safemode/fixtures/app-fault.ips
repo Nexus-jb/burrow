@@ -1,0 +1,157 @@
+{"app_name":"Example","timestamp":"2026-11-17 20:20:00.0000 -0500","app_version":"1.0","bug_type":"309","os_version":"iPhone OS 16.3.1 (20D67)","name":"Example","incident_id":"11111111-2222-3333-4444-000000000003","bundleID":"com.example.app","slice_uuid":"00000000-0000-0000-0000-000000000008"}
+{
+  "uptime": 1000,
+  "procName": "Example",
+  "procPath": "/private/var/containers/Bundle/Application/5E6F/Example.app/Example",
+  "captureTime": "2026-11-17 20:20:00.0000 -0500",
+  "exception": {
+    "type": "EXC_BAD_ACCESS",
+    "signal": "SIGSEGV",
+    "subtype": "KERN_INVALID_ADDRESS at 0x0000000000000000"
+  },
+  "faultingThread": 0,
+  "threads": [
+    {
+      "triggered": true,
+      "frames": [
+        {
+          "imageOffset": 16640,
+          "imageIndex": 8,
+          "symbol": "-[ExampleModel load]",
+          "symbolLocation": 0
+        },
+        {
+          "imageOffset": 12288,
+          "imageIndex": 2
+        },
+        {
+          "imageOffset": 4096,
+          "imageIndex": 1
+        }
+      ]
+    }
+  ],
+  "usedImages": [
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4295000064,
+      "size": 65536,
+      "uuid": "00000000-0000-0000-0000-000000000000",
+      "path": "/System/Library/CoreServices/SpringBoard.app/SpringBoard",
+      "name": "SpringBoard"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4295065600,
+      "size": 65536,
+      "uuid": "00000000-0000-0000-0000-000000000001",
+      "path": "/System/Library/PrivateFrameworks/UIKitCore.framework/UIKitCore",
+      "name": "UIKitCore"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4295131136,
+      "size": 65536,
+      "uuid": "00000000-0000-0000-0000-000000000002",
+      "path": "/private/preboot/0A1B2C/dopamine-XYZ/procursus/usr/lib/TweakInject/Foo.dylib",
+      "name": "Foo.dylib"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4295196672,
+      "size": 65536,
+      "uuid": "00000000-0000-0000-0000-000000000003",
+      "path": "/var/jb/usr/lib/TweakInject/Bar.dylib",
+      "name": "Bar.dylib"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4295262208,
+      "size": 65536,
+      "uuid": "00000000-0000-0000-0000-000000000004",
+      "path": "/private/preboot/0A1B2C/dopamine-XYZ/procursus/usr/lib/libcolorpicker.dylib",
+      "name": "libcolorpicker.dylib"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4295327744,
+      "size": 65536,
+      "uuid": "00000000-0000-0000-0000-000000000005",
+      "path": "/usr/lib/system/libsystem_kernel.dylib",
+      "name": "libsystem_kernel.dylib"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4295393280,
+      "size": 65536,
+      "uuid": "00000000-0000-0000-0000-000000000006",
+      "path": "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation",
+      "name": "CoreFoundation"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4295458816,
+      "size": 65536,
+      "uuid": "00000000-0000-0000-0000-000000000007",
+      "path": "/usr/lib/libobjc.A.dylib",
+      "name": "libobjc.A.dylib"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4295524352,
+      "size": 65536,
+      "uuid": "00000000-0000-0000-0000-000000000008",
+      "path": "/private/var/containers/Bundle/Application/5E6F/Example.app/Example",
+      "name": "Example"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4295589888,
+      "size": 65536,
+      "uuid": "00000000-0000-0000-0000-000000000009",
+      "path": "/usr/lib/libc++abi.dylib",
+      "name": "libc++abi.dylib"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4295655424,
+      "size": 65536,
+      "uuid": "00000000-0000-0000-0000-000000000010",
+      "path": "/usr/lib/system/libsystem_c.dylib",
+      "name": "libsystem_c.dylib"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4295720960,
+      "size": 65536,
+      "uuid": "00000000-0000-0000-0000-000000000011",
+      "path": "/usr/lib/system/libsystem_pthread.dylib",
+      "name": "libsystem_pthread.dylib"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4295786496,
+      "size": 65536,
+      "uuid": "00000000-0000-0000-0000-000000000012",
+      "path": "/private/preboot/0A1B2C/dopamine-XYZ/procursus/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate",
+      "name": "CydiaSubstrate"
+    }
+  ],
+  "bundleInfo": {
+    "CFBundleIdentifier": "com.example.app",
+    "CFBundleShortVersionString": "1.0"
+  }
+}

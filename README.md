@@ -66,7 +66,8 @@ make ios-tests-package PACKAGE_VERSION=0.0.0~dev.1
 
 [docs/hooking.md](docs/hooking.md) explains how hooks are installed and which
 rules keep them safe. [docs/loader.md](docs/loader.md) explains how the loader
-picks the tweaks for each process. Release packages will be built on GitHub Actions,
+picks the tweaks for each process, and [docs/safe-mode.md](docs/safe-mode.md)
+how Safe Mode finds the tweak behind a crash. Release packages will be built on GitHub Actions,
 signed, and published with build provenance attestations.
 
 ## Contributing

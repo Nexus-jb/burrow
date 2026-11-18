@@ -1,15 +1,18 @@
 #!/bin/sh
 # SPDX-License-Identifier: Apache-2.0
 #
-# Builds the loader tests into one directory:
+# Builds the loader and Safe Mode tests into one directory:
 #
 #   scripts/build-loader-tests.sh <out-dir> <macos|ios> <compiler> [flags...]
 #
 # The directory gets the test build of the loader, the test tweaks in
 # TweakInject/ with their filters from tests/loader/TweakInject, the two
-# test targets and loader-tests, which runs them:
+# test targets and loader-tests, which runs them. For Safe Mode it gets
+# crash-target, the test tweaks in CrashInject/ that crash it, the crash
+# report fixtures and safemode-tests:
 #
 #   loader-tests <out-dir>
+#   safemode-tests <out-dir>
 #
 # For ios, every binary is signed with ldid (set LDID to override).
 
@@ -103,6 +106,32 @@ PLIST
 # shellcheck disable=SC2086
 "$@" $flags tests/loader_tests.c -o "$out/loader-tests"
 sign "$out/loader-tests" tests/ios.entitlements
+
+# Safe Mode: a target that uses Foundation, one tweak that loads quietly and
+# two that crash it.
+mkdir -p "$out/CrashInject"
+# shellcheck disable=SC2086
+"$@" $flags tests/loader/target.c -o "$out/crash-target" -lobjc -framework Foundation
+sign "$out/crash-target" tests/ios.entitlements
+# shellcheck disable=SC2086
+"$@" $flags -dynamiclib -DBURROW_TWEAK_NAME='"Innocent"' -install_name @rpath/Innocent.dylib \
+    -Wl,-U,_burrow_loader_record tests/loader/tweak.c -o "$out/CrashInject/Innocent.dylib"
+sign "$out/CrashInject/Innocent.dylib"
+crash=1
+for tweak in SegvTweak ThrowTweak; do
+    # shellcheck disable=SC2086
+    "$@" $flags -dynamiclib -DBURROW_CRASH=$crash -install_name "@rpath/$tweak.dylib" \
+        tests/safemode/crash_tweak.c -o "$out/CrashInject/$tweak.dylib" -lobjc
+    sign "$out/CrashInject/$tweak.dylib"
+    crash=$((crash + 1))
+done
+cp tests/safemode/CrashInject/*.plist "$out/CrashInject/"
+mkdir -p "$out/safemode-fixtures"
+cp tests/safemode/fixtures/*.ips "$out/safemode-fixtures/"
+# shellcheck disable=SC2086
+"$@" $flags -fobjc-arc -Isafemode tests/safemode_tests.m safemode/crash_report.m safemode/safe_mode.m \
+    -o "$out/safemode-tests" -framework Foundation
+sign "$out/safemode-tests" tests/ios.entitlements
 
 # Compiling and linking in one step with -g leaves .dSYM folders beside
 # each binary; the tests do not need them.
