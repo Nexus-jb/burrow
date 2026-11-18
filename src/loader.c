@@ -7,7 +7,9 @@
 // Filters follow the documented Cydia Substrate format: foo.plist beside
 // foo.dylib holds a dictionary whose Filter key lists the bundles, classes,
 // executables and CoreFoundation versions the tweak is meant for. A tweak
-// without a filter is not loaded.
+// without a filter is not loaded. A tweak whose property list sets
+// IsTweakManager, such as one that turns tweaks off per app, is loaded
+// before every other tweak, and only when another tweak is loaded too.
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <dirent.h>
@@ -340,7 +342,8 @@ static bool filter_matches(CFDictionaryRef filter, struct process *process) {
     return present && !any;
 }
 
-static bool tweak_matches(const char *filter_path, const char *name, struct process *process) {
+static bool tweak_matches(const char *filter_path, const char *name, struct process *process, bool *manager) {
+    *manager = false;
     int error;
     CFPropertyListRef list = read_property_list(filter_path, &error);
     if (!list) {
@@ -353,6 +356,8 @@ static bool tweak_matches(const char *filter_path, const char *name, struct proc
     if (is_dictionary(list)) {
         CFTypeRef filter = CFDictionaryGetValue((CFDictionaryRef)list, CFSTR("Filter"));
         matches = is_dictionary(filter) && filter_matches((CFDictionaryRef)filter, process);
+        CFTypeRef flag = CFDictionaryGetValue((CFDictionaryRef)list, CFSTR("IsTweakManager"));
+        *manager = has_type(flag, CFBooleanGetTypeID()) && CFBooleanGetValue((CFBooleanRef)flag);
     }
     CFRelease(list);
     return matches;
@@ -524,25 +529,28 @@ static size_t list_tweaks(const char *directory, char ***names) {
     return count;
 }
 
-static void load_tweak(const char *directory, const char *name, CFDictionaryRef settings,
-                       struct process *process) {
+// Whether a tweak is to be loaded here, and whether it is a tweak manager.
+static bool should_load(const char *directory, const char *name, CFDictionaryRef settings, struct process *process,
+                        bool *manager) {
+    *manager = false;
     CFStringRef tweak = CFStringCreateWithCString(kCFAllocatorDefault, name, kCFStringEncodingUTF8);
     if (!tweak) {
-        return;
+        return false;
     }
     bool off = turned_off(settings, tweak, process);
     CFRelease(tweak);
     if (off) {
         os_log_info(OS_LOG_DEFAULT, "Burrow: %{public}s is turned off here", name);
-        return;
+        return false;
     }
-
     char path[PATH_MAX];
     int length = snprintf(path, sizeof path, "%s/%s.plist", directory, name);
-    if (length < 0 || (size_t)length >= sizeof path || !tweak_matches(path, name, process)) {
-        return;
-    }
-    length = snprintf(path, sizeof path, "%s/%s%s", directory, name, TWEAK_SUFFIX);
+    return length > 0 && (size_t)length < sizeof path && tweak_matches(path, name, process, manager);
+}
+
+static void open_tweak(const char *directory, const char *name) {
+    char path[PATH_MAX];
+    int length = snprintf(path, sizeof path, "%s/%s%s", directory, name, TWEAK_SUFFIX);
     if (length < 0 || (size_t)length >= sizeof path) {
         return;
     }
@@ -577,9 +585,25 @@ static void load_tweaks(const char *directory, const char *settings_path) {
         // banking app. Loading nothing keeps that promise.
         os_log_error(OS_LOG_DEFAULT, "Burrow: %{public}s cannot be read, so no tweaks are loaded", settings_path);
     } else {
-        for (size_t i = 0; i < count; i++) {
-            load_tweak(directory, names[i], settings, &process);
+        enum { SKIP, LOAD, LOAD_FIRST };
+        unsigned char *plan = calloc(count, 1);
+        bool others = false;
+        for (size_t i = 0; plan && i < count; i++) {
+            bool manager;
+            if (should_load(directory, names[i], settings, &process, &manager)) {
+                plan[i] = manager ? LOAD_FIRST : LOAD;
+                others = others || !manager;
+            }
         }
+        // Tweak managers first, and only for the sake of other tweaks.
+        for (int pass = LOAD_FIRST; plan && others && pass >= LOAD; pass--) {
+            for (size_t i = 0; i < count; i++) {
+                if (plan[i] == pass) {
+                    open_tweak(directory, names[i]);
+                }
+            }
+        }
+        free(plan);
     }
     if (settings) {
         CFRelease(settings);
@@ -588,7 +612,22 @@ static void load_tweaks(const char *directory, const char *settings_path) {
     free_names(names, count);
 }
 
+// The Substrate convention for starting a process without tweaks.
+static bool safe_mode_requested(void) {
+    const char *names[] = { "_MSSafeMode", "_SafeMode" };
+    for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) {
+        const char *value = getenv(names[i]);
+        if (value && atoi(value) == 1) {
+            return true;
+        }
+    }
+    return false;
+}
+
 __attribute__((constructor)) static void burrow_loader_start(void) {
+    if (safe_mode_requested()) {
+        return;
+    }
 #ifdef BURROW_LOADER_TESTING
     // Test builds only: the loader tests choose both paths.
     const char *directory = getenv("BURROW_TEST_TWEAK_DIRECTORY");

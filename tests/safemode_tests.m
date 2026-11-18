@@ -15,6 +15,7 @@
 #import "crash_report.h"
 #import "packages.h"
 #import "safe_mode.h"
+#import "service.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -244,6 +245,59 @@ static void test_crash_log(NSString *fixtures, NSString *dpkg, NSString *scratch
     CHECK(log.entries.count == 2);
     CHECK([log.entries.firstObject[BurrowCrashLogProcess] isEqualToString:@"Example"]);
     CHECK(![[NSFileManager defaultManager] fileExistsAtPath:first_copy]);
+}
+
+// The burrowd service: every report once, Safe Mode only from a date on.
+static void test_service(NSString *fixtures, NSString *dpkg, NSString *scratch) {
+    NSFileManager *files = [NSFileManager defaultManager];
+    NSString *reports = [scratch stringByAppendingPathComponent:@"service-reports"];
+    [files createDirectoryAtPath:reports withIntermediateDirectories:YES attributes:nil error:NULL];
+    void (^add)(NSString *) = ^(NSString *name) {
+        [files copyItemAtPath:[fixtures stringByAppendingPathComponent:name]
+                       toPath:[reports stringByAppendingPathComponent:name]
+                        error:NULL];
+    };
+    for (NSString *name in @[ @"segv.ips", @"exception.ips", @"app-fault.ips", @"no-tweaks.ips", @"hang.ips",
+                              @"malformed.ips" ]) {
+        add(name);
+    }
+    // A broken report that has not changed for a while is given up on.
+    [files setAttributes:@{ NSFileModificationDate : [NSDate dateWithTimeIntervalSinceNow:-3600] }
+            ofItemAtPath:[reports stringByAppendingPathComponent:@"malformed.ips"]
+                   error:NULL];
+
+    BurrowServicePaths *paths = [[BurrowServicePaths alloc] init];
+    paths.reportDirectories = @[ reports, [scratch stringByAppendingPathComponent:@"no-such-directory"] ];
+    paths.tweakDirectories = @[ @"/var/jb/usr/lib/TweakInject", [RealRoot stringByAppendingString:@"/usr/lib/TweakInject"] ];
+    paths.jailbreakRoots = @[ @"/var/jb", RealRoot ];
+    paths.dpkgDirectory = dpkg;
+    paths.settingsPath = [scratch stringByAppendingPathComponent:@"service-loader.plist"];
+    paths.safeModeStatePath = [scratch stringByAppendingPathComponent:@"service-safe-mode.plist"];
+    paths.crashLogDirectory = [scratch stringByAppendingPathComponent:@"service-crashes"];
+    BurrowService *service = [[BurrowService alloc] initWithPaths:paths];
+
+    // Safe Mode off: the crashes are logged, the settings stay untouched.
+    CHECK([service scan] == 3);
+    CHECK([service scan] == 0);
+    CHECK(![files fileExistsAtPath:paths.settingsPath]);
+
+    // Safe Mode on from a date: only later crashes turn tweaks off.
+    service.safeModeSince = fixture(fixtures, @"exception.ips").date;
+    add(@"exception-reason.ips");
+    CHECK([service scan] == 1);
+    NSDictionary *settings = read_plist(paths.settingsPath);
+    CHECK([settings[@"DisabledInProcesses"] isEqual:(@{ @"com.example.other" : @[ @"Foo" ] })]);
+
+    BurrowCrashAnalyzer *analyzer = [[BurrowCrashAnalyzer alloc] initWithTweakDirectories:@[] jailbreakRoots:@[]];
+    NSArray *entries = [[BurrowCrashLog alloc] initWithDirectory:paths.crashLogDirectory analyzer:analyzer packages:nil].entries;
+    CHECK(entries.count == 4);
+    NSUInteger springboard = [entries indexOfObjectPassingTest:^BOOL(NSDictionary *entry, NSUInteger position, BOOL *stop) {
+        (void)position;
+        (void)stop;
+        return [entry[BurrowCrashLogBundleIdentifier] isEqual:@"com.apple.springboard"];
+    }];
+    CHECK(springboard != NSNotFound &&
+          [entries[springboard][BurrowCrashLogPackages][@"Foo"][BurrowPackageVersion] isEqualToString:@"1.2"]);
 }
 
 #pragma mark Real crashes
@@ -478,6 +532,8 @@ int main(int argc, char **argv) {
         test_fixtures([dir stringByAppendingPathComponent:@"safemode-fixtures"], scratch);
         test_crash_log([dir stringByAppendingPathComponent:@"safemode-fixtures"],
                        [dir stringByAppendingPathComponent:@"safemode-dpkg"], scratch);
+        test_service([dir stringByAppendingPathComponent:@"safemode-fixtures"],
+                     [dir stringByAppendingPathComponent:@"safemode-dpkg"], scratch);
         test_real_crashes(dir, scratch);
         [[NSFileManager defaultManager] removeItemAtPath:scratch error:NULL];
 

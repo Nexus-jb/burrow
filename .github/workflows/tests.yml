@@ -82,7 +82,9 @@ jobs:
         timeout-minutes: 10
         env:
           VERSION: 0.0.0~dev.${{ github.run_number }}
-        run: make ios-tests-package PACKAGE_VERSION="$VERSION" < /dev/null
+        run: |
+          make ios-tests-package PACKAGE_VERSION="$VERSION" < /dev/null
+          make burrow-package PACKAGE_VERSION="$VERSION" < /dev/null
       - name: Inspect the package
         run: |
           for deb in build/packages/*.deb; do
@@ -94,9 +96,9 @@ jobs:
           otool -L build/ios/BurrowSampleTweak.dylib
           otool -l build/ios/BurrowSampleTweak.dylib | grep -A2 LC_RPATH
           nm -gU build/ios/arm64e/frameworks/CydiaSubstrate.framework/CydiaSubstrate
-          ls -lR build/ios/arm64e/loader
+          lipo -info build/ios-universal/*
       - uses: actions/upload-artifact@v4
         with:
-          name: burrow-tests-${{ github.run_number }}
+          name: burrow-${{ github.run_number }}
           path: build/packages/*.deb
           if-no-files-found: error

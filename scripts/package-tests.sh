@@ -4,23 +4,27 @@
 # Packages the iOS test programs as a rootless .deb, for running the tests
 # on a jailbroken device:
 #
-#   scripts/package-tests.sh <build-dir> <version> <out-dir>
+#   scripts/package-tests.sh <build-dir> <version> <out-dir> <universal-dir>
 #
 # <build-dir> holds one directory per architecture (arm64 and arm64e), each
 # with the signed test programs, Burrow built as CydiaSubstrate.framework and
 # the loader tests in loader/, and the sample tweak BurrowSampleTweak.dylib.
-# After installing the package, run "burrow-tests" in a terminal.
+# <universal-dir> holds the crash probe and its tweak, which go into the
+# system's tweak directory with a filter for the probe only.
+# After installing the package, run "burrow-tests" in a terminal, or
+# "burrow-tests probe" to check burrowd from the Burrow package.
 
 set -eu
 
-if [ "$#" -ne 3 ]; then
-    echo "usage: $0 <build-dir> <version> <out-dir>" >&2
+if [ "$#" -ne 4 ]; then
+    echo "usage: $0 <build-dir> <version> <out-dir> <universal-dir>" >&2
     exit 2
 fi
 
 build=$1
 version=$2
 out=$3
+universal=$4
 package=com.nexusjb.burrow-tests
 architecture=iphoneos-arm64
 
@@ -60,11 +64,39 @@ for arch in $architectures; do
 done
 cp "$build/BurrowSampleTweak.dylib" "$libexec/BurrowSampleTweak.dylib"
 chmod 0755 "$libexec/BurrowSampleTweak.dylib"
+install -m 0755 "$universal/burrow-crash-probe" "$libexec/burrow-crash-probe"
+mkdir -p "$stage/var/jb/usr/lib/TweakInject"
+install -m 0755 "$universal/BurrowCrashProbe.dylib" "$stage/var/jb/usr/lib/TweakInject/BurrowCrashProbe.dylib"
+install -m 0644 tests/safemode/probe/BurrowCrashProbe.plist "$stage/var/jb/usr/lib/TweakInject/BurrowCrashProbe.plist"
 
 cat > "$stage/var/jb/usr/bin/burrow-tests" <<'SCRIPT'
 #!/var/jb/bin/sh
 # SPDX-License-Identifier: Apache-2.0
 # Runs Burrow's tests on this device, built for arm64 and for arm64e.
+# "burrow-tests probe" checks burrowd instead.
+if [ "${1:-}" = probe ]; then
+    if ! command -v burrowctl >/dev/null 2>&1; then
+        echo "Install the Burrow package (com.nexusjb.burrow) first."
+        exit 1
+    fi
+    before=$(burrowctl crashes 1)
+    echo "Crashing burrow-crash-probe on purpose..."
+    /var/jb/usr/libexec/burrow-tests/burrow-crash-probe
+    i=0
+    while [ "$i" -lt 30 ]; do
+        sleep 2
+        latest=$(burrowctl crashes 1)
+        if [ "$latest" != "$before" ] && printf '%s\n' "$latest" | grep -q BurrowCrashProbe; then
+            echo "$latest"
+            echo "Probe: burrowd logged the crash and blamed the probe tweak"
+            exit 0
+        fi
+        i=$((i + 1))
+    done
+    echo "Probe: burrowd did not log the crash within 60 seconds"
+    burrowctl status
+    exit 1
+fi
 failed=0
 total=0
 run() {
