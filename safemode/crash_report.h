@@ -42,6 +42,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly, copy, nullable) NSDate *date;
 @property (nonatomic, readonly, copy, nullable) NSString *exceptionType;
 @property (nonatomic, readonly, copy, nullable) NSString *signalName;
+// Such as "KERN_INVALID_ADDRESS at 0x0000000000000010".
+@property (nonatomic, readonly, copy, nullable) NSString *exceptionSubtype;
 // The uncaught exception's name and reason, when the crash was one.
 @property (nonatomic, readonly, copy, nullable) NSString *uncaughtExceptionName;
 @property (nonatomic, readonly, copy, nullable) NSString *uncaughtExceptionReason;

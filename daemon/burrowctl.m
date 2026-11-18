@@ -8,6 +8,8 @@
 //   burrowctl events          what Safe Mode turned off, and why
 //   burrowctl loaded NAME     the tweak loader, hooking engine and tweaks in
 //                             the running processes called NAME (as root)
+//   burrowctl why NAME|FILE   the newest crash report of the process NAME, or
+//                             the report FILE: what happened, and where
 //   burrowctl loader burrow   make Burrow's loader the system's tweak loader
 //                             for new processes, with the guard watching
 //   burrowctl loader ellekit  go back to ElleKit's loader
@@ -152,6 +154,82 @@ static int loaded(NSString *name) {
     return status;
 }
 
+static NSString *describe_frame(BurrowCrashFrame *frame) {
+    NSString *image = frame.image.name ?: frame.image.path.lastPathComponent ?: @"?";
+    NSString *where = frame.symbol.length ? [NSString stringWithFormat:@"%@ + %llu", frame.symbol, frame.symbolOffset]
+                                          : [NSString stringWithFormat:@"0x%llx", frame.imageOffset];
+    return [NSString stringWithFormat:@"%@  %@", image, where];
+}
+
+static int why(BurrowServicePaths *paths, NSString *what) {
+    NSFileManager *files = [NSFileManager defaultManager];
+    NSString *path = what;
+    if (![what hasSuffix:@".ips"]) {
+        NSDate *newest = nil;
+        path = nil;
+        for (NSString *directory in paths.reportDirectories) {
+            for (NSString *name in [files contentsOfDirectoryAtPath:directory error:NULL]) {
+                if (![name hasSuffix:@".ips"] || !([name hasPrefix:[what stringByAppendingString:@"-"]] ||
+                                                   [name hasPrefix:[what stringByAppendingString:@"."]])) {
+                    continue;
+                }
+                NSString *candidate = [directory stringByAppendingPathComponent:name];
+                NSDate *modified = [files attributesOfItemAtPath:candidate error:NULL].fileModificationDate;
+                if (!newest || [modified compare:newest] == NSOrderedDescending) {
+                    newest = modified;
+                    path = candidate;
+                }
+            }
+        }
+        if (!path) {
+            print([NSString stringWithFormat:@"No crash report for %@.", what]);
+            return 1;
+        }
+    }
+    NSError *error = nil;
+    BurrowCrashReport *report = [BurrowCrashReport reportWithContentsOfFile:path error:&error];
+    if (!report.isCrash) {
+        print([NSString stringWithFormat:@"%@ is not a crash report%@", path.lastPathComponent,
+                                         error ? [@": " stringByAppendingString:error.localizedDescription] : @"."]);
+        return 1;
+    }
+    print(path.lastPathComponent);
+    print([NSString stringWithFormat:@"Process:   %@%@", report.processName,
+                                     report.bundleIdentifier ? [NSString stringWithFormat:@" (%@)", report.bundleIdentifier] : @""]);
+    print([NSString stringWithFormat:@"Date:      %@", format_date(report.date)]);
+    print([NSString stringWithFormat:@"Exception: %@ (%@)%@", report.exceptionType ?: @"?", report.signalName ?: @"?",
+                                     report.exceptionSubtype ? [@", " stringByAppendingString:report.exceptionSubtype] : @""]);
+    if (report.uncaughtExceptionName) {
+        print([NSString stringWithFormat:@"Uncaught:  %@: %@", report.uncaughtExceptionName,
+                                         report.uncaughtExceptionReason ?: @""]);
+    }
+    BurrowCrashAnalyzer *analyzer = [[BurrowCrashAnalyzer alloc] initWithTweakDirectories:paths.tweakDirectories
+                                                                           jailbreakRoots:paths.jailbreakRoots];
+    BurrowCrashAnalysis *analysis = [analyzer analyzeReport:report];
+    print([NSString stringWithFormat:@"Tweaks:    %@", analysis.tweaks.count ? [analysis.tweaks componentsJoinedByString:@", "]
+                                                                            : @"none loaded"]);
+    print([NSString stringWithFormat:@"To blame:  %@", analysis.culprit ?: @"no single tweak"]);
+    print(@"Crashed thread:");
+    NSUInteger shown = 0;
+    for (BurrowCrashFrame *frame in report.crashedThreadFrames) {
+        if (shown == 20) {
+            break;
+        }
+        print([NSString stringWithFormat:@"  %2lu %@", (unsigned long)shown++, describe_frame(frame)]);
+    }
+    if (report.lastExceptionFrames.count) {
+        print(@"Exception thrown at:");
+        shown = 0;
+        for (BurrowCrashFrame *frame in report.lastExceptionFrames) {
+            if (shown == 12) {
+                break;
+            }
+            print([NSString stringWithFormat:@"  %2lu %@", (unsigned long)shown++, describe_frame(frame)]);
+        }
+    }
+    return 0;
+}
+
 static int loader(NSString *which) {
     if (geteuid() != 0) {
         print(@"Switching the tweak loader needs root.");
@@ -236,6 +314,9 @@ int main(int argc, char **argv) {
         if ([command isEqualToString:@"events"] && argc <= 2) {
             return events(paths);
         }
+        if ([command isEqualToString:@"why"] && argc == 3) {
+            return why(paths, @(argv[2]));
+        }
         if ([command isEqualToString:@"loaded"] && argc == 3) {
             return loaded(@(argv[2]));
         }
@@ -245,7 +326,8 @@ int main(int argc, char **argv) {
                 return result;
             }
         }
-        fprintf(stderr, "usage: burrowctl status | crashes [count] | events | loaded NAME | loader burrow|ellekit\n");
+        fprintf(stderr, "usage: burrowctl status | crashes [count] | events | why NAME|FILE | loaded NAME | "
+                        "loader burrow|ellekit\n");
         return 2;
     }
 }

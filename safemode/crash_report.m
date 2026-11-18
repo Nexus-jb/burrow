@@ -76,6 +76,7 @@ static NSUUID *uuid_value(NSDictionary *dictionary, NSString *key) {
 @property (nonatomic, readwrite, copy, nullable) NSDate *date;
 @property (nonatomic, readwrite, copy, nullable) NSString *exceptionType;
 @property (nonatomic, readwrite, copy, nullable) NSString *signalName;
+@property (nonatomic, readwrite, copy, nullable) NSString *exceptionSubtype;
 @property (nonatomic, readwrite, copy, nullable) NSString *uncaughtExceptionName;
 @property (nonatomic, readwrite, copy, nullable) NSString *uncaughtExceptionReason;
 @property (nonatomic, readwrite, copy) NSArray<BurrowCrashFrame *> *crashedThreadFrames;
@@ -157,6 +158,7 @@ static NSUUID *uuid_value(NSDictionary *dictionary, NSString *key) {
     NSDictionary *exception = typed(body[@"exception"], [NSDictionary class]);
     report.exceptionType = string_value(exception, @"type");
     report.signalName = string_value(exception, @"signal");
+    report.exceptionSubtype = string_value(exception, @"subtype");
     // Newer reports describe an uncaught exception in exceptionReason;
     // older ones only in the application specific information.
     NSDictionary *reason = typed(body[@"exceptionReason"], [NSDictionary class]);
