@@ -127,6 +127,7 @@ uint64_t t_duplicate(uint64_t);
 uint64_t t_batch_a(uint64_t);
 uint64_t t_batch_b(uint64_t);
 uint64_t t_batch_partial(uint64_t);
+uint64_t t_memory(uint64_t);
 
 // Checks the shape of an installed patch against the mode.
 static void check_patch(fn target, fn replacement, fn original) {
@@ -246,6 +247,19 @@ static void test_foreign_patch(void) {
     for (size_t i = 0; i < INPUT_COUNT; i++) {
         CHECK(t_foreign(inputs[i]) == (inputs[i] + 1000) * 2);
     }
+}
+
+// Byte-level writes, as MSHookMemory and LHPatchMemory make.
+static void test_write_memory(void) {
+    current = "write memory";
+    const uint32_t patch[2] = { 0xD2800540u, 0xD65F03C0u };  // mov x0, #42; ret
+    uint8_t bytes[sizeof patch];
+    memcpy(bytes, patch, sizeof patch);
+    CHECK(t_memory(1) == 2);
+    CHECK(burrow_write_memory(address_of(t_memory), bytes, sizeof bytes));
+    CHECK(t_memory(1) == 42);
+    CHECK(burrow_write_memory(address_of(t_memory) + 1, bytes, 0));
+    CHECK(t_memory(1) == 42);
 }
 
 static uint32_t data_words[8] = { 0xD503201Fu };
@@ -378,6 +392,7 @@ int main(int argc, char **argv) {
     test_short_neighbor();
     test_chain();
     test_foreign_patch();
+    test_write_memory();
     test_arguments();
     test_batches();
 
