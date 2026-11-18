@@ -16,7 +16,7 @@
 
 static NSString *format_date(id date) {
     if (![date isKindOfClass:[NSDate class]]) {
-        return @"????-??-?? ??:??";
+        return @"(no date)       ";
     }
     NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
     formatter.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
