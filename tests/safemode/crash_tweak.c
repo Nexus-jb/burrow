@@ -8,9 +8,10 @@
 #include <objc/message.h>
 #include <objc/runtime.h>
 
-__attribute__((noinline, visibility("default"))) void burrow_crash_now(void);
+// No tail calls, so the tweak's frames stay on the stack, as in real tweaks.
+__attribute__((noinline, disable_tail_calls, visibility("default"))) void burrow_crash_now(void);
 
-void burrow_crash_now(void) {
+__attribute__((disable_tail_calls)) void burrow_crash_now(void) {
 #if BURROW_CRASH == 1
     volatile int *volatile target = 0;
     *target = 1;
@@ -21,6 +22,6 @@ void burrow_crash_now(void) {
 #endif
 }
 
-__attribute__((constructor)) static void crash_on_load(void) {
+__attribute__((constructor, disable_tail_calls)) static void crash_on_load(void) {
     burrow_crash_now();
 }

@@ -125,6 +125,14 @@ static void test_fixtures(NSString *fixtures, NSString *scratch) {
         isEqualToString:@"uncaught NSRangeException (*** -[__NSArrayM objectAtIndex:]: index 5 beyond bounds "
                         @"[0 .. 2]) in Bar.dylib + 0x1a2c"]);
 
+    // Newer reports put the exception in exceptionReason. The abort and
+    // throw machinery above the tweak does not count towards the limit.
+    CHECK(handle(safe_mode, fixtures, @"exception-reason.ips", &event) == BurrowSafeModeTurnedOffTweak);
+    CHECK([event[BurrowSafeModeEventTweak] isEqualToString:@"Foo"]);
+    CHECK([event[BurrowSafeModeEventReason]
+        isEqualToString:@"uncaught NSInvalidArgumentException (+[NSObject fooMissing]: unrecognized selector sent to "
+                        @"class 0x1f0a) in Foo.dylib (-[FooController viewDidLoad] + 4)"]);
+
     // No blame when the app's own code or too many frames come first.
     CHECK(handle(safe_mode, fixtures, @"app-fault.ips", &event) == BurrowSafeModeNoCulprit);
     CHECK(event == nil);
@@ -147,7 +155,7 @@ static void test_fixtures(NSString *fixtures, NSString *scratch) {
     CHECK([read_plist(settings)[@"DisabledInProcesses"][@"backboardd"] isEqual:@[ @"*" ]]);
 
     NSArray *events = safe_mode.events;
-    CHECK(events.count == 3);
+    CHECK(events.count == 4);
     CHECK([events.firstObject[BurrowSafeModeEventReport] isEqualToString:@"segv.ips"]);
     CHECK([events.lastObject[BurrowSafeModeEventTweak] isEqualToString:@"*"]);
 

@@ -22,7 +22,8 @@ static NSString *const AllTweaks = @"*";
 
 // Frames from the crash site down that may belong to the system, Burrow or
 // libraries from the jailbreak before the tweak that called them. Beyond
-// this, a tweak frame is too far from the crash to blame.
+// this, a tweak frame is too far from the crash to blame. Frames in the
+// crash machinery (abort, exception throwing) do not count.
 static const NSUInteger MaxSkippedFrames = 12;
 // The repeated-crash rule: this many crashes of one process within the
 // window, with tweaks loaded and none to blame, turn every tweak off there.
@@ -270,8 +271,19 @@ static BOOL has_any_prefix(NSString *path, NSArray<NSString *> *prefixes) {
 - (NSString *)culpritInFrames:(NSArray<BurrowCrashFrame *> *)frames
                      inReport:(BurrowCrashReport *)report
                         frame:(BurrowCrashFrame **)found {
+    static NSSet<NSString *> *machinery;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        machinery = [NSSet setWithArray:@[
+            @"/usr/lib/system/libsystem_kernel.dylib", @"/usr/lib/system/libsystem_pthread.dylib",
+            @"/usr/lib/system/libsystem_c.dylib", @"/usr/lib/libc++abi.dylib", @"/usr/lib/libobjc.A.dylib"
+        ]];
+    });
     NSUInteger skipped = 0;
     for (BurrowCrashFrame *frame in frames) {
+        if (frame.image.path && [machinery containsObject:frame.image.path]) {
+            continue;
+        }
         NSString *tweak = nil;
         switch ([self kindOfImage:frame.image inReport:report tweak:&tweak]) {
         case BurrowImageTweak:

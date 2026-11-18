@@ -153,7 +153,14 @@ static NSUUID *uuid_value(NSDictionary *dictionary, NSString *key) {
     NSDictionary *exception = typed(body[@"exception"], [NSDictionary class]);
     report.exceptionType = string_value(exception, @"type");
     report.signalName = string_value(exception, @"signal");
-    [report readUncaughtException:typed(body[@"asi"], [NSDictionary class])];
+    // Newer reports describe an uncaught exception in exceptionReason;
+    // older ones only in the application specific information.
+    NSDictionary *reason = typed(body[@"exceptionReason"], [NSDictionary class]);
+    report.uncaughtExceptionName = string_value(reason, @"name");
+    report.uncaughtExceptionReason = string_value(reason, @"composed_message") ?: string_value(reason, @"reason");
+    if (!report.uncaughtExceptionName.length) {
+        [report readUncaughtException:typed(body[@"asi"], [NSDictionary class])];
+    }
 
     NSMutableArray<BurrowCrashImage *> *images = [NSMutableArray array];
     for (id item in typed(body[@"usedImages"], [NSArray class])) {
