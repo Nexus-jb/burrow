@@ -161,10 +161,23 @@ $(IOS_BUILD)/%/burrowctl: daemon/burrowctl.m $(SERVICE) $(SERVICE_HEADERS)
 		daemon/burrowctl.m $(SERVICE) -o $@ -framework Foundation
 	$(LDID) -S $@
 
-# Universal binaries for the package: every process, arm64 or arm64e, can
+# The crash probe for checking burrowd on a device (see the probe's source).
+$(IOS_BUILD)/%/burrow-crash-probe: tests/safemode/probe/probe.c tests/ios.entitlements
+	mkdir -p $(@D)
+	$(IOS_CC) -arch $* -mios-version-min=15.0 $(COMMON) $(CFLAGS) tests/safemode/probe/probe.c -o $@
+	$(LDID) -Stests/ios.entitlements $@
+
+$(IOS_BUILD)/%/BurrowCrashProbe.dylib: tests/safemode/crash_tweak.c
+	mkdir -p $(@D)
+	$(IOS_CC) -arch $* -mios-version-min=15.0 $(COMMON) $(CFLAGS) -dynamiclib -DBURROW_CRASH=1 \
+		-install_name @rpath/BurrowCrashProbe.dylib tests/safemode/crash_tweak.c -o $@ -lobjc
+	$(LDID) -S $@
+
+# Universal binaries for the packages: every process, arm64 or arm64e, can
 # load the libraries.
 IOS_UNIVERSAL := $(BUILD)/ios-universal
 UNIVERSAL := BurrowLoader.dylib burrowd burrowctl
+PROBE := burrow-crash-probe BurrowCrashProbe.dylib
 
 $(IOS_UNIVERSAL)/%: $(IOS_BUILD)/arm64/% $(IOS_BUILD)/arm64e/%
 	mkdir -p $(@D)
@@ -184,10 +197,10 @@ $(IOS_BUILD)/BurrowSampleTweak.dylib: tests/tweak/Tweak.x tests/tweak/Makefile
 	cp tests/tweak/.theos/obj/BurrowSampleTweak.dylib $@
 
 ios-tests: $(foreach arch,$(IOS_ARCHS),$(addprefix $(IOS_BUILD)/$(arch)/,$(IOS_PROGRAMS))) \
-	$(IOS_BUILD)/BurrowSampleTweak.dylib
+	$(IOS_BUILD)/BurrowSampleTweak.dylib $(addprefix $(IOS_UNIVERSAL)/,$(PROBE))
 
 ios-tests-package: ios-tests
-	scripts/package-tests.sh $(IOS_BUILD) $(PACKAGE_VERSION) $(BUILD)/packages
+	scripts/package-tests.sh $(IOS_BUILD) $(PACKAGE_VERSION) $(BUILD)/packages $(IOS_UNIVERSAL)
 
 clean:
 	rm -rf $(BUILD)

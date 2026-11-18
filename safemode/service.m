@@ -42,6 +42,9 @@ static NSArray<NSString *> *with_real_path(NSString *path) {
 @implementation BurrowService {
     BurrowServicePaths *_paths;
     NSMutableSet<NSString *> *_seen;
+    NSUInteger _reports;
+    NSUInteger _crashes;
+    NSMutableDictionary<NSString *, NSNumber *> *_directories;
 }
 
 - (instancetype)initWithPaths:(BurrowServicePaths *)paths {
@@ -49,8 +52,13 @@ static NSArray<NSString *> *with_real_path(NSString *path) {
     if (self) {
         _paths = paths;
         _seen = [NSMutableSet set];
+        _directories = [NSMutableDictionary dictionary];
     }
     return self;
+}
+
+- (NSDictionary *)statistics {
+    return @{ @"Reports" : @(_reports), @"Crashes" : @(_crashes), @"Directories" : [_directories copy] };
 }
 
 - (NSUInteger)scan {
@@ -70,7 +78,11 @@ static NSArray<NSString *> *with_real_path(NSString *path) {
     // Oldest first, so the log keeps the order of the crashes.
     NSMutableArray<NSString *> *reports = [NSMutableArray array];
     for (NSString *directory in _paths.reportDirectories) {
-        for (NSString *name in [files contentsOfDirectoryAtPath:directory error:NULL]) {
+        NSArray<NSString *> *names = [files contentsOfDirectoryAtPath:directory error:NULL];
+        _directories[directory] = names ? @([names filteredArrayUsingPredicate:
+                                                   [NSPredicate predicateWithFormat:@"self ENDSWITH '.ips'"]].count)
+                                        : @(-1);
+        for (NSString *name in names) {
             NSString *path = [directory stringByAppendingPathComponent:name];
             if ([name hasSuffix:@".ips"] && ![_seen containsObject:path]) {
                 [reports addObject:path];
@@ -97,9 +109,11 @@ static NSArray<NSString *> *with_real_path(NSString *path) {
                 continue;
             }
             [_seen addObject:path];
+            _reports++;
             if (!report.isCrash) {
                 continue;
             }
+            _crashes++;
             NSError *error = nil;
             NSDictionary *entry = nil;
             if (![log recordReport:report data:data name:path.lastPathComponent entry:&entry error:&error]) {

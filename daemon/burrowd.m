@@ -40,6 +40,13 @@ int main(void) {
                 if (logged) {
                     os_log(OS_LOG_DEFAULT, "burrowd: logged %lu crashes", (unsigned long)logged);
                 }
+                NSMutableDictionary *statistics = [service.statistics mutableCopy];
+                statistics[@"LastScan"] = [NSDate date];
+                NSData *data = [NSPropertyListSerialization dataWithPropertyList:statistics
+                                                                          format:NSPropertyListXMLFormat_v1_0
+                                                                         options:0
+                                                                           error:NULL];
+                [data writeToFile:BurrowDaemonStatisticsPath atomically:YES];
             }
         };
         __block BOOL pending = NO;

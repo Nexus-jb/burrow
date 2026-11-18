@@ -13,6 +13,7 @@ NSString *const BurrowSystemEnginePath = @"/var/jb/Library/Frameworks/CydiaSubst
 NSString *const BurrowLoaderPath = @"/var/jb/usr/lib/burrow/BurrowLoader.dylib";
 NSString *const BurrowEnginePath = @"/var/jb/usr/lib/burrow/CydiaSubstrate.framework/CydiaSubstrate";
 NSString *const BurrowDaemonPIDPath = @"/var/jb/var/lib/burrow/burrowd.pid";
+NSString *const BurrowDaemonStatisticsPath = @"/var/jb/var/lib/burrow/burrowd.plist";
 
 static NSString *real_path(NSString *path) {
     char resolved[PATH_MAX];

@@ -12,6 +12,7 @@ extern NSString *const BurrowSystemEnginePath;     // what tweaks link against
 extern NSString *const BurrowLoaderPath;           // Burrow's loader
 extern NSString *const BurrowEnginePath;           // Burrow as CydiaSubstrate
 extern NSString *const BurrowDaemonPIDPath;
+extern NSString *const BurrowDaemonStatisticsPath;  // what burrowd has read, written after each look
 
 // "Burrow", "ElleKit", "none", or the path the file resolves to.
 NSString *BurrowOwnerOfFile(NSString *path);

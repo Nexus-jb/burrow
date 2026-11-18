@@ -48,6 +48,21 @@ static int status(BurrowServicePaths *paths) {
     print([NSString stringWithFormat:@"Hooking engine:  %@", engine]);
     pid_t pid = BurrowDaemonPID();
     print(pid ? [NSString stringWithFormat:@"burrowd:         running (pid %d)", pid] : @"burrowd:         not running");
+    NSData *data = [NSData dataWithContentsOfFile:BurrowDaemonStatisticsPath];
+    NSDictionary *statistics = data ? [NSPropertyListSerialization propertyListWithData:data options:0 format:NULL error:NULL]
+                                    : nil;
+    if ([statistics isKindOfClass:[NSDictionary class]]) {
+        print([NSString stringWithFormat:@"Crash reports:   %@ read (%@ crashes), last look %@", statistics[@"Reports"],
+                                         statistics[@"Crashes"], format_date(statistics[@"LastScan"])]);
+        NSDictionary *directories = statistics[@"Directories"];
+        if ([directories isKindOfClass:[NSDictionary class]]) {
+            for (NSString *directory in [directories.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
+                NSInteger count = [directories[directory] integerValue];
+                print(count < 0 ? [NSString stringWithFormat:@"                 %@: missing", directory]
+                                : [NSString stringWithFormat:@"                 %@: %ld reports", directory, (long)count]);
+            }
+        }
+    }
 
     NSArray *entries = crash_entries(paths);
     NSUInteger blamed = 0;

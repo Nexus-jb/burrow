@@ -33,6 +33,11 @@ NS_ASSUME_NONNULL_BEGIN
 // Handles every report not seen before. Returns how many it handled.
 - (NSUInteger)scan;
 
+// What the service has read since it started: Reports and Crashes (counts),
+// and Directories, each report directory with the number of reports in it
+// at the last scan, or -1 when it does not exist.
+- (NSDictionary *)statistics;
+
 @end
 
 NS_ASSUME_NONNULL_END
