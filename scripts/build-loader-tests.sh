@@ -130,7 +130,7 @@ mkdir -p "$out/safemode-fixtures"
 cp tests/safemode/fixtures/*.ips "$out/safemode-fixtures/"
 cp -R tests/safemode/dpkg "$out/safemode-dpkg"
 # shellcheck disable=SC2086
-"$@" $flags -fobjc-arc -Isafemode tests/safemode_tests.m safemode/*.m \
+"$@" $flags -fobjc-arc -Isafemode -Idaemon tests/safemode_tests.m safemode/*.m daemon/switch.m daemon/inspect.m \
     -o "$out/safemode-tests" -framework Foundation
 sign "$out/safemode-tests" tests/ios.entitlements
 

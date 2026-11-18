@@ -13,6 +13,11 @@ extern NSString *const BurrowLoaderPath;           // Burrow's loader
 extern NSString *const BurrowEnginePath;           // Burrow as CydiaSubstrate
 extern NSString *const BurrowDaemonPIDPath;
 extern NSString *const BurrowDaemonStatisticsPath;  // what burrowd has read, written after each look
+extern NSString *const BurrowTrialPath;             // when the guard's trial ends: Until (NSDate)
+extern NSString *const BurrowGuardPath;             // when the guard went back to ElleKit: Date, Reason
+
+// How long after taking over the guard watches SpringBoard most closely.
+extern const NSTimeInterval BurrowTrialLength;
 
 // "Burrow", "ElleKit", "none", or the path the file resolves to.
 NSString *BurrowOwnerOfFile(NSString *path);

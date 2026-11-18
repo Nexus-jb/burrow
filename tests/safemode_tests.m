@@ -14,8 +14,10 @@
 #import "crash_log.h"
 #import "crash_report.h"
 #import "packages.h"
+#import "inspect.h"
 #import "safe_mode.h"
 #import "service.h"
+#import "switch.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -300,6 +302,135 @@ static void test_service(NSString *fixtures, NSString *dpkg, NSString *scratch) 
           [entries[springboard][BurrowCrashLogPackages][@"Foo"][BurrowPackageVersion] isEqualToString:@"1.2"]);
 }
 
+// The guard: SpringBoard crashing twice in the trial, or any crash inside
+// Burrow's loader, and only after Burrow's loader took over.
+static void test_guard(NSString *fixtures, NSString *dpkg, NSString *scratch) {
+    NSFileManager *files = [NSFileManager defaultManager];
+    NSString *reports = [scratch stringByAppendingPathComponent:@"guard-reports"];
+    [files createDirectoryAtPath:reports withIntermediateDirectories:YES attributes:nil error:NULL];
+    void (^add)(NSString *) = ^(NSString *name) {
+        [files copyItemAtPath:[fixtures stringByAppendingPathComponent:name]
+                       toPath:[reports stringByAppendingPathComponent:name]
+                        error:NULL];
+    };
+    BurrowServicePaths *paths = [[BurrowServicePaths alloc] init];
+    paths.reportDirectories = @[ reports ];
+    paths.tweakDirectories = @[ @"/var/jb/usr/lib/TweakInject" ];
+    paths.jailbreakRoots = @[ @"/var/jb", RealRoot ];
+    paths.dpkgDirectory = dpkg;
+    paths.settingsPath = [scratch stringByAppendingPathComponent:@"guard-loader.plist"];
+    paths.safeModeStatePath = [scratch stringByAppendingPathComponent:@"guard-safe-mode.plist"];
+    paths.crashLogDirectory = [scratch stringByAppendingPathComponent:@"guard-crashes"];
+
+    NSDate *switched = [fixture(fixtures, @"guard-springboard-1.ips").date dateByAddingTimeInterval:-60];
+    BurrowService *service = [[BurrowService alloc] initWithPaths:paths];
+    service.guardSince = switched;
+    service.guardTrialUntil = [switched dateByAddingTimeInterval:15 * 60];
+    add(@"guard-springboard-1.ips");
+    [service scan];
+    CHECK(service.guardReason == nil);
+    add(@"guard-springboard-2.ips");
+    [service scan];
+    CHECK([service.guardReason isEqualToString:@"SpringBoard crashed 2 times soon after Burrow's loader took over"]);
+    [service resetGuard];
+    CHECK(service.guardReason == nil);
+    add(@"guard-loader.ips");
+    [service scan];
+    CHECK([service.guardReason isEqualToString:@"Preferences crashed inside Burrow's loader"]);
+
+    // Crashes from before Burrow's loader took over do not count.
+    BurrowService *later = [[BurrowService alloc] initWithPaths:paths];
+    later.guardSince = [switched dateByAddingTimeInterval:3600];
+    later.guardTrialUntil = [later.guardSince dateByAddingTimeInterval:15 * 60];
+    [later scan];
+    CHECK(later.guardReason == nil);
+}
+
+static NSString *in_path(NSString *command) {
+    for (NSString *directory in [NSProcessInfo.processInfo.environment[@"PATH"] componentsSeparatedByString:@":"]) {
+        NSString *path = [directory stringByAppendingPathComponent:command];
+        if ([[NSFileManager defaultManager] isExecutableFileAtPath:path]) {
+            return path;
+        }
+    }
+    return nil;
+}
+
+// The loader switch, on a copy of the file tree with its own dpkg database,
+// so the test never touches the system's files.
+static void test_switch(NSString *scratch) {
+    NSString *dpkg_divert = in_path(@"dpkg-divert");
+    CHECK(dpkg_divert != nil);
+    if (!dpkg_divert) {
+        fprintf(stderr, "[safemode] the switch tests need dpkg-divert\n");
+        return;
+    }
+    NSFileManager *files = [NSFileManager defaultManager];
+    NSString *root = [scratch stringByAppendingPathComponent:@"switch-root"];
+    NSString *admin = [scratch stringByAppendingPathComponent:@"switch-dpkg"];
+    NSString *lib = [root stringByAppendingPathComponent:@"var/jb/usr/lib"];
+    for (NSString *directory in @[ [lib stringByAppendingPathComponent:@"ellekit"],
+                                   [lib stringByAppendingPathComponent:@"burrow"], admin ]) {
+        [files createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:NULL];
+    }
+    [@"" writeToFile:[admin stringByAppendingPathComponent:@"diversions"] atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+    [@"ElleKit" writeToFile:[lib stringByAppendingPathComponent:@"ellekit/libinjector.dylib"]
+                 atomically:YES
+                   encoding:NSUTF8StringEncoding
+                      error:NULL];
+    NSString *burrow_loader = [lib stringByAppendingPathComponent:@"burrow/BurrowLoader.dylib"];
+    [@"Burrow" writeToFile:burrow_loader atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+    NSString *loader = [lib stringByAppendingPathComponent:@"TweakLoader.dylib"];
+    NSString *diverted = [lib stringByAppendingPathComponent:@"TweakLoader.ellekit.dylib"];
+    [files createSymbolicLinkAtPath:loader withDestinationPath:@"/var/jb/usr/lib/ellekit/libinjector.dylib" error:NULL];
+
+    BurrowSwitch *loader_switch =
+        [[BurrowSwitch alloc] initWithRoot:root dpkgDivert:@[ dpkg_divert, @"--admindir", admin, @"--instdir", root ]];
+    CHECK([loader_switch.loaderOwner isEqualToString:@"ElleKit"]);
+
+    NSError *error = nil;
+    BOOL switched = [loader_switch useBurrowLoader:&error];
+    CHECK(switched);
+    if (!switched) {
+        fprintf(stderr, "[safemode]   %s\n", error.localizedDescription.UTF8String);
+    }
+    CHECK([loader_switch.loaderOwner isEqualToString:@"Burrow"]);
+    CHECK([[files destinationOfSymbolicLinkAtPath:diverted error:NULL]
+        isEqualToString:@"/var/jb/usr/lib/ellekit/libinjector.dylib"]);
+    CHECK([loader_switch useBurrowLoader:NULL]);
+    CHECK([loader_switch.loaderOwner isEqualToString:@"Burrow"]);
+
+    error = nil;
+    BOOL back = [loader_switch useElleKitLoader:&error];
+    CHECK(back);
+    if (!back) {
+        fprintf(stderr, "[safemode]   %s\n", error.localizedDescription.UTF8String);
+    }
+    CHECK([loader_switch.loaderOwner isEqualToString:@"ElleKit"]);
+    CHECK(![files fileExistsAtPath:diverted] && ![files destinationOfSymbolicLinkAtPath:diverted error:NULL]);
+    CHECK([loader_switch useElleKitLoader:NULL]);
+
+    // Without Burrow's loader nothing changes.
+    [files removeItemAtPath:burrow_loader error:NULL];
+    CHECK(![loader_switch useBurrowLoader:NULL]);
+    CHECK([loader_switch.loaderOwner isEqualToString:@"ElleKit"]);
+    CHECK(![files destinationOfSymbolicLinkAtPath:diverted error:NULL]);
+}
+
+// Reading what a process has loaded, on this very process.
+static void test_inspect(void) {
+    NSString *name = NSProcessInfo.processInfo.processName;
+    CHECK([BurrowProcessesNamed(name.length > 16 ? [name substringToIndex:16] : name) containsObject:@(getpid())]);
+    NSArray<NSString *> *mapped = BurrowMappedFiles(getpid());
+    NSString *executable = NSProcessInfo.processInfo.arguments.firstObject.lastPathComponent;
+    NSUInteger found = [mapped indexOfObjectPassingTest:^BOOL(NSString *path, NSUInteger position, BOOL *stop) {
+        (void)position;
+        (void)stop;
+        return [path.lastPathComponent isEqualToString:executable];
+    }];
+    CHECK(found != NSNotFound);
+}
+
 #pragma mark Real crashes
 
 // Runs crash-target and returns what it printed. *crashed is set when a
@@ -534,6 +665,10 @@ int main(int argc, char **argv) {
                        [dir stringByAppendingPathComponent:@"safemode-dpkg"], scratch);
         test_service([dir stringByAppendingPathComponent:@"safemode-fixtures"],
                      [dir stringByAppendingPathComponent:@"safemode-dpkg"], scratch);
+        test_guard([dir stringByAppendingPathComponent:@"safemode-fixtures"],
+                   [dir stringByAppendingPathComponent:@"safemode-dpkg"], scratch);
+        test_switch(scratch);
+        test_inspect();
         test_real_crashes(dir, scratch);
         [[NSFileManager defaultManager] removeItemAtPath:scratch error:NULL];
 

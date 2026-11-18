@@ -14,6 +14,9 @@ NSString *const BurrowLoaderPath = @"/var/jb/usr/lib/burrow/BurrowLoader.dylib";
 NSString *const BurrowEnginePath = @"/var/jb/usr/lib/burrow/CydiaSubstrate.framework/CydiaSubstrate";
 NSString *const BurrowDaemonPIDPath = @"/var/jb/var/lib/burrow/burrowd.pid";
 NSString *const BurrowDaemonStatisticsPath = @"/var/jb/var/lib/burrow/burrowd.plist";
+NSString *const BurrowTrialPath = @"/var/jb/var/lib/burrow/trial.plist";
+NSString *const BurrowGuardPath = @"/var/jb/var/lib/burrow/guard.plist";
+const NSTimeInterval BurrowTrialLength = 15 * 60;
 
 static NSString *real_path(NSString *path) {
     char resolved[PATH_MAX];

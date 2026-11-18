@@ -30,6 +30,15 @@ NS_ASSUME_NONNULL_BEGIN
 // settings would change nothing.
 @property (nonatomic, copy, nullable) NSDate *safeModeSince;
 
+// The guard, for the time after Burrow's loader takes over: from
+// guardSince on, a crash inside Burrow's loader, in any process, or
+// SpringBoard crashing twice before guardTrialUntil, sets guardReason. The
+// owner of the service then returns to the jailbreak's own loader.
+@property (nonatomic, copy, nullable) NSDate *guardSince;
+@property (nonatomic, copy, nullable) NSDate *guardTrialUntil;
+@property (nonatomic, readonly, copy, nullable) NSString *guardReason;
+- (void)resetGuard;
+
 // Handles every report not seen before. Returns how many it handled.
 - (NSUInteger)scan;
 

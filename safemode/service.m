@@ -14,6 +14,8 @@
 
 // A report that cannot be read yet may still be being written.
 static const NSTimeInterval ReportWriteTime = 60;
+// SpringBoard crashes in the trial that send the guard back.
+static const NSUInteger GuardSpringBoardCrashes = 2;
 
 static NSArray<NSString *> *with_real_path(NSString *path) {
     char resolved[PATH_MAX];
@@ -45,6 +47,8 @@ static NSArray<NSString *> *with_real_path(NSString *path) {
     NSMutableSet<NSString *> *_seen;
     NSUInteger _reports;
     NSUInteger _crashes;
+    NSUInteger _springBoardCrashes;
+    NSString *_guardReason;
     NSMutableDictionary<NSString *, NSNumber *> *_directories;
 }
 
@@ -56,6 +60,35 @@ static NSArray<NSString *> *with_real_path(NSString *path) {
         _directories = [NSMutableDictionary dictionary];
     }
     return self;
+}
+
+- (NSString *)guardReason {
+    return _guardReason;
+}
+
+- (void)resetGuard {
+    _guardReason = nil;
+    _springBoardCrashes = 0;
+}
+
+- (void)guardReport:(BurrowCrashReport *)report {
+    if (!self.guardSince || !report.date || [report.date compare:self.guardSince] != NSOrderedDescending ||
+        _guardReason) {
+        return;
+    }
+    for (BurrowCrashFrame *frame in report.crashedThreadFrames) {
+        NSString *name = frame.image.name ?: frame.image.path.lastPathComponent;
+        if ([name isEqualToString:@"BurrowLoader.dylib"]) {
+            _guardReason = [NSString stringWithFormat:@"%@ crashed inside Burrow's loader", report.processName];
+            return;
+        }
+    }
+    if ([report.processName isEqualToString:@"SpringBoard"] && self.guardTrialUntil &&
+        [report.date compare:self.guardTrialUntil] != NSOrderedDescending &&
+        ++_springBoardCrashes >= GuardSpringBoardCrashes) {
+        _guardReason = [NSString stringWithFormat:@"SpringBoard crashed %lu times soon after Burrow's loader took over",
+                                                  (unsigned long)_springBoardCrashes];
+    }
 }
 
 - (NSDictionary *)statistics {
@@ -115,6 +148,7 @@ static NSArray<NSString *> *with_real_path(NSString *path) {
                 continue;
             }
             _crashes++;
+            [self guardReport:report];
             NSError *error = nil;
             NSDictionary *entry = nil;
             if (![log recordReport:report data:data name:path.lastPathComponent entry:&entry error:&error]) {

@@ -3,16 +3,25 @@
 // burrowctl: shows what Burrow is doing on this device.
 //
 //   burrowctl status          the tweak loader and hooking engine in use,
-//                             burrowd, the crash log and Safe Mode
+//                             burrowd, the crash log, Safe Mode and the guard
 //   burrowctl crashes [N]     the N newest crashes with tweaks loaded (10)
 //   burrowctl events          what Safe Mode turned off, and why
+//   burrowctl loaded NAME     the tweak loader, hooking engine and tweaks in
+//                             the running processes called NAME (as root)
+//   burrowctl loader burrow   make Burrow's loader the system's tweak loader
+//                             for new processes, with the guard watching
+//   burrowctl loader ellekit  go back to ElleKit's loader
 
 #import <Foundation/Foundation.h>
 
 #import "crash_log.h"
+#import "inspect.h"
 #import "safe_mode.h"
 #import "service.h"
 #import "state.h"
+#import "switch.h"
+
+#include <unistd.h>
 
 static NSString *format_date(id date) {
     if (![date isKindOfClass:[NSDate class]]) {
@@ -80,7 +89,107 @@ static int status(BurrowServicePaths *paths) {
     } else {
         print(@"Safe Mode:       off until Burrow's loader loads the tweaks");
     }
+    NSDictionary *trial = [NSDictionary dictionaryWithContentsOfFile:BurrowTrialPath];
+    NSDictionary *went_back = [NSDictionary dictionaryWithContentsOfFile:BurrowGuardPath];
+    if (since && [trial[@"Until"] isKindOfClass:[NSDate class]] && [trial[@"Until"] timeIntervalSinceNow] > 0) {
+        print([NSString stringWithFormat:@"Guard:           watching SpringBoard closely until %@",
+                                         format_date(trial[@"Until"])]);
+    } else if (since) {
+        print(@"Guard:           watching for crashes in Burrow's loader");
+    } else if (went_back) {
+        print([NSString stringWithFormat:@"Guard:           went back to ElleKit on %@: %@", format_date(went_back[@"Date"]),
+                                         went_back[@"Reason"]]);
+    }
     return 0;
+}
+
+static NSString *owner_of_mapped(NSArray<NSString *> *files, NSArray<NSString *> *burrow, NSArray<NSString *> *ellekit) {
+    for (NSString *file in files) {
+        for (NSString *part in burrow) {
+            if ([file hasSuffix:part]) {
+                return @"Burrow";
+            }
+        }
+        for (NSString *part in ellekit) {
+            if ([file hasSuffix:part]) {
+                return @"ElleKit";
+            }
+        }
+    }
+    return @"none";
+}
+
+static int loaded(NSString *name) {
+    NSArray<NSNumber *> *pids = BurrowProcessesNamed(name);
+    if (!pids.count) {
+        print([NSString stringWithFormat:@"No running process is called %@.", name]);
+        return 1;
+    }
+    int status = 0;
+    for (NSNumber *pid in pids) {
+        NSArray<NSString *> *files = BurrowMappedFiles(pid.intValue);
+        if (!files) {
+            print([NSString stringWithFormat:@"%@ (pid %@): cannot be read; run burrowctl as root", name, pid]);
+            status = 1;
+            continue;
+        }
+        NSMutableArray<NSString *> *tweaks = [NSMutableArray array];
+        for (NSString *file in files) {
+            if ([file containsString:@"/TweakInject/"] && [file hasSuffix:@".dylib"]) {
+                [tweaks addObject:file.lastPathComponent.stringByDeletingPathExtension];
+            }
+        }
+        [tweaks sortUsingSelector:@selector(compare:)];
+        print([NSString stringWithFormat:@"%@ (pid %@)", name, pid]);
+        print([NSString stringWithFormat:@"  loader: %@", owner_of_mapped(files, @[ @"/burrow/BurrowLoader.dylib" ],
+                                                                          @[ @"/ellekit/libinjector.dylib" ])]);
+        print([NSString stringWithFormat:@"  engine: %@",
+                                         owner_of_mapped(files, @[ @"/burrow/CydiaSubstrate.framework/CydiaSubstrate" ],
+                                                         @[ @"/libellekit.dylib" ])]);
+        print([NSString stringWithFormat:@"  tweaks (%lu): %@", (unsigned long)tweaks.count,
+                                         tweaks.count ? [tweaks componentsJoinedByString:@", "] : @"none"]);
+    }
+    return status;
+}
+
+static int loader(NSString *which) {
+    if (geteuid() != 0) {
+        print(@"Switching the tweak loader needs root.");
+        return 1;
+    }
+    BurrowSwitch *system_switch = [BurrowSwitch systemSwitch];
+    NSError *error = nil;
+    if ([which isEqualToString:@"burrow"]) {
+        if (!BurrowDaemonPID()) {
+            print(@"burrowd is not running, and the guard needs it. Reinstall the Burrow package first.");
+            return 1;
+        }
+        NSDate *until = [NSDate dateWithTimeIntervalSinceNow:BurrowTrialLength];
+        [[NSFileManager defaultManager] removeItemAtPath:BurrowGuardPath error:NULL];
+        if (![@{ @"Until" : until } writeToFile:BurrowTrialPath atomically:YES] ||
+            ![system_switch useBurrowLoader:&error]) {
+            [[NSFileManager defaultManager] removeItemAtPath:BurrowTrialPath error:NULL];
+            print([NSString stringWithFormat:@"The tweak loader did not change: %@",
+                                             error.localizedDescription ?: @"the guard cannot be set up"]);
+            return 1;
+        }
+        print(@"Burrow's loader now loads tweaks into new processes.");
+        print([NSString stringWithFormat:@"Until %@, burrowd goes back to ElleKit's loader by itself if SpringBoard "
+                                         @"crashes twice, and at any time if a process crashes inside Burrow's loader.",
+                                         format_date(until)]);
+        print(@"Respring to load SpringBoard with it: killall SpringBoard");
+        return 0;
+    }
+    if ([which isEqualToString:@"ellekit"]) {
+        if (![system_switch useElleKitLoader:&error]) {
+            print([NSString stringWithFormat:@"The tweak loader did not change: %@", error.localizedDescription]);
+            return 1;
+        }
+        [[NSFileManager defaultManager] removeItemAtPath:BurrowTrialPath error:NULL];
+        print(@"ElleKit's loader loads tweaks into new processes again. Respring to load SpringBoard with it.");
+        return 0;
+    }
+    return 2;
 }
 
 static int crashes(BurrowServicePaths *paths, NSUInteger count) {
@@ -127,7 +236,16 @@ int main(int argc, char **argv) {
         if ([command isEqualToString:@"events"] && argc <= 2) {
             return events(paths);
         }
-        fprintf(stderr, "usage: burrowctl status | crashes [count] | events\n");
+        if ([command isEqualToString:@"loaded"] && argc == 3) {
+            return loaded(@(argv[2]));
+        }
+        if ([command isEqualToString:@"loader"] && argc == 3) {
+            int result = loader(@(argv[2]));
+            if (result != 2) {
+                return result;
+            }
+        }
+        fprintf(stderr, "usage: burrowctl status | crashes [count] | events | loaded NAME | loader burrow|ellekit\n");
         return 2;
     }
 }
