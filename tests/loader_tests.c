@@ -7,8 +7,8 @@
 //   loader-tests <dir>
 //
 // <dir> is built by scripts/build-loader-tests.sh: it holds
-// BurrowLoaderTesting.dylib, the test tweaks in TweakInject/, loader-target
-// and LoaderTarget.app.
+// BurrowLoaderTesting.dylib, the test tweaks in TweakInject/, the old arm64e
+// ABI test tweak in LegacyInject/, loader-target and LoaderTarget.app.
 
 #include <TargetConditionals.h>
 #include <errno.h>
@@ -216,6 +216,22 @@ int main(int argc, char **argv) {
         if (variable[0]) {
             unsetenv(variable);
         }
+    }
+    // A tweak whose arm64e slice is built for the old ABI and has a class of
+    // its own is not loaded in arm64e processes. Elsewhere it loads, unless
+    // the test build is told to check as if it were in an arm64e process.
+    char legacy[PATH_MAX];
+    if (join(legacy, dir, "LegacyInject")) {
+        unlink(settings);
+        setenv("BURROW_TEST_TWEAK_DIRECTORY", legacy, 1);
+#if defined(__arm64e__)
+        expect("old arm64e ABI", "loader-target", plain, loader, "");
+#else
+        expect("old arm64e ABI", "loader-target", plain, loader, "LegacyABI");
+        setenv("BURROW_TEST_ARM64E_CHECK", "1", 1);
+        expect("old arm64e ABI, checked as in arm64e", "loader-target", plain, loader, "");
+        unsetenv("BURROW_TEST_ARM64E_CHECK");
+#endif
     }
     unlink(settings);
     rmdir(scratch);

@@ -3,6 +3,7 @@
 # make                 build the static library
 # make test            run every test (arm64 Linux or macOS)
 # make test-relocation run the relocation unit tests (any host)
+# make test-legacy-abi run the old arm64e ABI check's unit tests (any host)
 # make test-loader     run the loader tests (macOS)
 # make test-safemode   run the Safe Mode tests (macOS; they crash a test program)
 #
@@ -34,8 +35,10 @@ endif
 PORTABLE := src/arm64.c src/relocate.c src/memory_common.c
 OBJC := src/objc.c src/objc_stubs.S
 COMPAT := src/compat.c src/symbols.c
-LOADER_TEST_SOURCES := src/loader.c tests/loader/tweak.c tests/loader/target.c tests/loader_tests.c \
-	$(wildcard tests/loader/TweakInject/*.plist) scripts/build-loader-tests.sh tests/ios.entitlements \
+LOADER := src/loader.c src/legacy_abi.c
+LOADER_TEST_SOURCES := $(LOADER) tests/loader/tweak.c tests/loader/target.c tests/loader_tests.c \
+	tests/loader/legacy_tweak.m $(wildcard tests/loader/TweakInject/*.plist tests/loader/LegacyInject/*.plist) \
+	scripts/build-loader-tests.sh tests/ios.entitlements \
 	$(wildcard safemode/*.h safemode/*.m) tests/safemode_tests.m tests/safemode/crash_tweak.c \
 	$(wildcard tests/safemode/CrashInject/*.plist tests/safemode/fixtures/*.ips) \
 	tests/safemode/dpkg/status
@@ -67,7 +70,7 @@ PACKAGE_VERSION ?= 0.0.0~dev
 HEADERS := $(wildcard include/burrow/*.h src/*.h)
 MODES := direct island adrp abs adrp-far abs-far
 
-.PHONY: all test test-relocation test-loader test-safemode ios-tests ios-tests-package burrow-package clean
+.PHONY: all test test-relocation test-legacy-abi test-loader test-safemode ios-tests ios-tests-package burrow-package clean
 
 all: $(BUILD)/libburrow.a
 
@@ -92,6 +95,12 @@ $(BUILD)/hook-tests: tests/hook_tests.c tests/targets.S $(LIBRARY) $(HEADERS) | 
 test-relocation: $(BUILD)/relocation-tests
 	$(RUN) $(BUILD)/relocation-tests
 
+$(BUILD)/legacy-abi-tests: tests/legacy_abi_tests.c src/legacy_abi.c $(HEADERS) | $(BUILD)/lib
+	$(CC) $(COMMON) $(CFLAGS) tests/legacy_abi_tests.c src/legacy_abi.c -o $@ $(LDFLAGS)
+
+test-legacy-abi: $(BUILD)/legacy-abi-tests
+	$(RUN) $(BUILD)/legacy-abi-tests
+
 $(BUILD)/objc-tests: tests/objc_tests.c $(LIBRARY) $(HEADERS) | $(BUILD)/lib
 	$(CC) $(COMMON) $(CFLAGS) tests/objc_tests.c $(LIBRARY) -o $@ $(LDFLAGS) $(LDLIBS)
 
@@ -105,7 +114,7 @@ test-loader: $(BUILD)/loader/loader-tests
 test-safemode: $(BUILD)/loader/loader-tests
 	$(RUN) $(BUILD)/loader/safemode-tests $(BUILD)/loader
 
-test: test-relocation $(BUILD)/hook-tests $(OBJC_TESTS) $(LOADER_TESTS)
+test: test-relocation test-legacy-abi $(BUILD)/hook-tests $(OBJC_TESTS) $(LOADER_TESTS)
 	@for mode in $(MODES); do $(RUN) $(BUILD)/hook-tests $$mode || exit 1; done
 	@for program in $(OBJC_TESTS); do $(RUN) $$program || exit 1; done
 
@@ -139,10 +148,10 @@ $(IOS_BUILD)/%/substrate-tests: tests/substrate_tests.c $(HEADERS) tests/ios.ent
 	$(LDID) -Stests/ios.entitlements $@
 
 # The tweak loader, with the jailbreak's tweak directory built in.
-$(IOS_BUILD)/%/BurrowLoader.dylib: src/loader.c $(HEADERS)
+$(IOS_BUILD)/%/BurrowLoader.dylib: $(LOADER) $(HEADERS)
 	mkdir -p $(@D)
 	$(IOS_CC) -arch $* -mios-version-min=15.0 $(COMMON) -fvisibility=hidden $(CFLAGS) -dynamiclib \
-		-install_name @rpath/BurrowLoader.dylib src/loader.c -o $@ -framework CoreFoundation -lobjc
+		-install_name @rpath/BurrowLoader.dylib $(LOADER) -o $@ -framework CoreFoundation -lobjc
 	$(LDID) -S $@
 
 $(IOS_BUILD)/%/loader/loader-tests: $(LOADER_TEST_SOURCES) $(HEADERS)

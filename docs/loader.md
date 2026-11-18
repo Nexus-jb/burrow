@@ -30,7 +30,9 @@ A tweak is not loaded when:
 - it has no filter, or its filter cannot be read;
 - its `Filter` dictionary has none of the keys above;
 - the library cannot be loaded. The loader logs the reason and goes on with
-  the next tweak.
+  the next tweak;
+- in an arm64e process, its arm64e code is built for the old arm64e ABI and
+  it has Objective-C classes or categories of its own (see below).
 
 Tweaks are loaded in the order of their names, compared byte by byte, so
 `000First.dylib` loads before `Alpha.dylib`. Files whose names start with a
@@ -81,6 +83,30 @@ but cannot be read, or a key has the wrong type, the loader loads no tweaks
 at all and logs why. The settings may be what keeps tweaks out of a banking
 app, so a broken file must not load them by mistake.
 
+## Tweaks built for the old arm64e ABI
+
+Xcode 12 changed the arm64e ABI. Toolchains from before it, and some that
+still only produce the old ABI, mark a library's arm64e code without the
+pointer authentication ABI flag in its CPU subtype. Recent versions of the
+Objective-C runtime authenticate class data that such a library does not
+sign, and the process crashes while the runtime reads the library's classes,
+before the tweak's constructor runs. Seen with SpringBoard on iOS 16.3.1:
+
+    EXC_BAD_ACCESS (SIGBUS), Address size fault
+    readClass(objc_class*, bool, bool) + 92   libobjc.A.dylib
+    map_images_nolock + 3372                  libobjc.A.dylib
+    dyld4::APIs::dlopen_from(...) + 1200      dyld
+    burrow_loader_start + 2596                BurrowLoader.dylib
+
+In arm64e processes the loader therefore reads the Mach-O headers of each
+tweak it is about to load (`src/legacy_abi.c`). It skips a tweak whose
+arm64e code, in a thin file or in any arm64e slice of a universal one, is
+built for the old ABI and has a non-empty class or category list, and logs
+that it needs a build with a current toolchain. Old-ABI tweaks without
+classes or categories of their own, such as ones that only hook methods,
+still load. In arm64 processes the arm64e code is not used, so nothing is
+checked there.
+
 ## Processes without CoreFoundation
 
 Most processes load CoreFoundation themselves. In a process that does not,
@@ -114,6 +140,15 @@ variables, and checks which tweaks loaded and in what order. Among the test twea
 unreadable filter, one with an empty filter, one that is not a library, a
 tweak manager whose name sorts last, and filters in OpenStep format and
 with `Mode` set to `Any`.
+
+A last case runs `loader-target` with only `LegacyABI` in the tweak
+directory: a tweak with a class of its own, a slice for the test's
+architecture and an arm64e slice marked as built for the old ABI. In arm64e
+processes the loader must skip it. Elsewhere it loads, and the test build of
+the loader checks as if it were in an arm64e process when
+`BURROW_TEST_ARM64E_CHECK` is `1`, so the check also runs on Macs.
+`make test-legacy-abi` runs the unit tests of the header reading on any
+host, with Mach-O files built in memory.
 
 Device results:
 
