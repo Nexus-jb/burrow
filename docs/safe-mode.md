@@ -62,8 +62,8 @@ turned off Bar in com.example.app: an uncaught exception (SIGABRT) in Bar.dylib 
 turned off every tweak in backboardd: crashed 3 times within 120 seconds, and no single tweak was to blame
 ```
 
-Codling shows these events and lets the person turn a tweak back on. The
-last 100 events are kept.
+The events are for the package manager to show, next to a way to turn the
+tweak back on. The last 100 events are kept.
 
 Safe Mode changes the loader settings under an exclusive lock on
 `<settings>.lock`, and anything else that writes them must take the same
