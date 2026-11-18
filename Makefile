@@ -34,7 +34,7 @@ endif
 PORTABLE := src/arm64.c src/relocate.c src/memory_common.c
 OBJC := src/objc.c src/objc_stubs.S
 COMPAT := src/compat.c src/symbols.c
-LOADER_TEST_SOURCES := src/loader.c tests/loader/tweak.c tests/loader/target.c tests/loader_tests.c \
+LOADER_TEST_SOURCES := src/loader.c tests/loader/tweak.c tests/loader/target.c tests/loader/annotation.h tests/loader_tests.c \
 	$(wildcard tests/loader/TweakInject/*.plist) scripts/build-loader-tests.sh tests/ios.entitlements \
 	$(wildcard safemode/*.h safemode/*.m) tests/safemode_tests.m tests/safemode/crash_tweak.c \
 	$(wildcard tests/safemode/CrashInject/*.plist tests/safemode/fixtures/*.ips) \
@@ -42,7 +42,7 @@ LOADER_TEST_SOURCES := src/loader.c tests/loader/tweak.c tests/loader/target.c t
 DARWIN_LIBRARY := $(PORTABLE) src/hook.c src/memory_darwin.c $(OBJC)
 SERVICE := safemode/crash_report.m safemode/crash_analysis.m safemode/safe_mode.m safemode/crash_log.m \
 	safemode/packages.m safemode/service.m daemon/state.m
-SERVICE_HEADERS := $(wildcard safemode/*.h daemon/*.h)
+SERVICE_HEADERS := $(wildcard safemode/*.h daemon/*.h) src/loader_annotation.h
 
 ifeq ($(shell uname -s),Darwin)
 LIBRARY := $(DARWIN_LIBRARY) $(COMPAT)

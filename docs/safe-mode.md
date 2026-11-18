@@ -27,7 +27,10 @@ JSON header line and a JSON body. Safe Mode reads:
   reason when the report has them (reports from iOS 16 do not);
 - the crashed thread's frames and, for an uncaught Objective-C exception,
   the backtrace where it was thrown;
-- every loaded image's path and UUID.
+- every loaded image's path and UUID;
+- the application specific information: messages that images leave for
+  crash reports, by image name. Burrow's loader leaves one while it loads
+  a tweak (see [loader.md](loader.md#crash-reports)).
 
 Reports hide parts of some paths, such as `/Users/USER/*/Foo.dylib`, so
 Safe Mode recognizes tweaks by UUID: it reads the UUIDs of every tweak in
@@ -47,6 +50,17 @@ of an uncaught exception, then in the crashed thread:
   the crash is not blamed: a tweak that hooks a busy method appears in many
   backtraces without causing the crash. Frames in the crash machinery
   (`abort`, `libc++abi`, `libobjc`) do not count.
+
+When no tweak is found that way and the crashed thread was in Burrow's
+loader, the tweak the loader was loading is to blame. The report may not
+list that tweak among its images yet: dyld lists an image only once it is
+mapped, and a crash can come before, as when the Objective-C runtime fails
+while it reads the tweak's classes. Such a tweak counts as loaded even when
+another thread crashed, but then it is not blamed. The reason names the
+crash site, even in the Objective-C runtime, and says that the tweak was
+loading:
+
+    EXC_BAD_ACCESS (SIGBUS) while it was loading, in libobjc.A.dylib (readClass(objc_class*, bool, bool) + 92)
 
 When one tweak is to blame, Safe Mode adds it to `DisabledInProcesses` in
 the loader settings (see [loader.md](loader.md)) for the crashed process,
@@ -141,7 +155,9 @@ read.
   uncaught exception thrown by a tweak through a jailbreak library, both
   exception formats, a crash in the app's own code, a tweak frame too deep
   to blame, a crash loop, a process without tweaks, a hang report, a broken
-  report, the same report twice, and settings that are not valid.
+  report, the same report twice, settings that are not valid, and a crash
+  in the Objective-C runtime while the loader loads a tweak that the report
+  does not list, on the loader's thread and on another one.
 - The crash log with the same reports and a small dpkg database in
   `tests/safemode/dpkg`: the tweak and package names, the kept copy, the
   skipped reports, and the oldest entries going first.
@@ -151,7 +167,8 @@ read.
   build of the loader. `SegvTweak` writes through a null pointer and
   `ThrowTweak` throws an uncaught exception; `Innocent` does nothing. The
   test waits for the system's crash report and hands it to Safe Mode and
-  the crash log. It checks that the crashing tweak was turned off and
+  the crash log. It checks that the report carries the loader's message
+  naming the crashing tweak, that the crashing tweak was turned off and
   `Innocent` was not, and that the log names the crashing tweak and its
   package. On a jailbroken device that is the test package itself, read
   from the real dpkg database. The test deletes the reports it made.

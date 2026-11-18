@@ -81,6 +81,17 @@ but cannot be read, or a key has the wrong type, the loader loads no tweaks
 at all and logs why. The settings may be what keeps tweaks out of a banking
 app, so a broken file must not load them by mistake.
 
+## Crash reports
+
+While the loader opens a tweak, it leaves the message `Burrow is loading
+Foo` for crash reports, in a `__DATA,__crash_info` section in the layout
+that crash reporters read (`src/loader_annotation.h`). A report written
+before `dlopen` returns lists it as application specific information under
+the loader's name. Safe Mode and the crash log then blame that tweak, even
+when the crash came before the tweak was listed among the process's images
+(see [safe-mode.md](safe-mode.md#who-is-to-blame)). Once `dlopen` returns,
+the message is cleared.
+
 ## Processes without CoreFoundation
 
 Most processes load CoreFoundation themselves. In a process that does not,
@@ -108,7 +119,9 @@ filters from `tests/loader/TweakInject`, and two targets:
   `com.nexusjb.burrow-tests.loader-target`, and it uses Foundation like an
   app.
 
-Each test tweak tells the target when its constructor runs. The test program
+Each test tweak tells the target when its constructor runs, and checks
+that the loader's message for crash reports names it at that moment; the
+target checks that the loader cleared the message when it was done. The test program
 runs both targets under eleven settings files and the two safe mode
 variables, and checks which tweaks loaded and in what order. Among the test tweaks are one with no filter, one with an
 unreadable filter, one with an empty filter, one that is not a library, a

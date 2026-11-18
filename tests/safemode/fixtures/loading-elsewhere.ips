@@ -1,0 +1,162 @@
+{"app_name":"SpringBoard","timestamp":"2026-11-18 00:14:52.00 -0500","app_version":"1.0","bug_type":"309","os_version":"iPhone OS 16.3.1 (20D67)","name":"SpringBoard","incident_id":"11111111-2222-3333-4444-0000000000a1","bundleID":"com.apple.springboard","slice_uuid":"00000000-0000-0000-0000-0000000000a0"}
+{
+  "uptime": 660000,
+  "procName": "SpringBoard",
+  "procPath": "/System/Library/CoreServices/SpringBoard.app/SpringBoard",
+  "captureTime": "2026-11-18 00:14:52.3343 -0500",
+  "modelCode": "iPhone15,3",
+  "bundleInfo": {
+    "CFBundleIdentifier": "com.apple.springboard"
+  },
+  "exception": {
+    "codes": "0x0000000000000105, 0x00000000dac11a30",
+    "type": "EXC_BAD_ACCESS",
+    "signal": "SIGBUS",
+    "subtype": "UNKNOWN_0x105 at 0x00000000dac11a30"
+  },
+  "asi": {
+    "BurrowLoader.dylib": [
+      "Burrow is loading Quux"
+    ]
+  },
+  "faultingThread": 0,
+  "threads": [
+    {
+      "triggered": true,
+      "id": 1,
+      "queue": "com.apple.main-thread",
+      "frames": [
+        {
+          "imageOffset": 51140,
+          "symbol": "readClass(objc_class*, bool, bool)",
+          "symbolLocation": 92,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 2960,
+          "symbol": "start_wqthread",
+          "symbolLocation": 0,
+          "imageIndex": 4
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "frames": [
+        {
+          "imageOffset": 51140,
+          "symbol": "readClass(objc_class*, bool, bool)",
+          "symbolLocation": 92,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 56240,
+          "symbol": "map_images_nolock",
+          "symbolLocation": 3372,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 59624,
+          "symbol": "map_images",
+          "symbolLocation": 116,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 149032,
+          "symbol": "dyld4::RuntimeState::notifyLoad(std::__1::span<dyld4::Loader const*, 18446744073709551615ul> const&)",
+          "symbolLocation": 656,
+          "imageIndex": 1
+        },
+        {
+          "imageOffset": 50280,
+          "symbol": "dyld4::APIs::dlopen_from(char const*, int, void*)",
+          "symbolLocation": 1200,
+          "imageIndex": 1
+        },
+        {
+          "imageOffset": 18980,
+          "symbol": "burrow_loader_start",
+          "symbolLocation": 2596,
+          "imageIndex": 2
+        },
+        {
+          "imageOffset": 45696,
+          "symbol": "invocation function for block in dyld4::Loader::findAndRunAllInitializers(dyld4::RuntimeState&) const",
+          "symbolLocation": 156,
+          "imageIndex": 1
+        },
+        {
+          "imageOffset": 50292,
+          "symbol": "dyld4::APIs::dlopen_from(char const*, int, void*)",
+          "symbolLocation": 1212,
+          "imageIndex": 1
+        },
+        {
+          "imageOffset": 19876,
+          "symbol": "initializer",
+          "symbolLocation": 1368,
+          "imageIndex": 3
+        },
+        {
+          "imageOffset": 104660,
+          "symbol": "start",
+          "symbolLocation": 2388,
+          "imageIndex": 1
+        }
+      ]
+    }
+  ],
+  "usedImages": [
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 6650068992,
+      "size": 278048,
+      "uuid": "00000000-0000-0000-0000-0000000000a1",
+      "path": "/usr/lib/libobjc.A.dylib",
+      "name": "libobjc.A.dylib"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4375822336,
+      "size": 589824,
+      "uuid": "00000000-0000-0000-0000-0000000000a2",
+      "path": "/private/preboot/0A1B2C/dopamine-XYZ/procursus/basebin/gen/dyld",
+      "name": "dyld"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4373725184,
+      "size": 49152,
+      "uuid": "00000000-0000-0000-0000-0000000000a3",
+      "path": "/private/preboot/0A1B2C/dopamine-XYZ/procursus/usr/lib/burrow/BurrowLoader.dylib",
+      "name": "BurrowLoader.dylib"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4372512768,
+      "size": 49152,
+      "uuid": "00000000-0000-0000-0000-0000000000a4",
+      "path": "/private/preboot/0A1B2C/dopamine-XYZ/procursus/basebin/systemhook.dylib",
+      "name": "systemhook.dylib"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 8077197312,
+      "size": 49152,
+      "uuid": "00000000-0000-0000-0000-0000000000a5",
+      "path": "/usr/lib/system/libsystem_pthread.dylib",
+      "name": "libsystem_pthread.dylib"
+    },
+    {
+      "size": 0,
+      "source": "A",
+      "base": 0,
+      "uuid": "00000000-0000-0000-0000-000000000000"
+    }
+  ]
+}

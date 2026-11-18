@@ -27,6 +27,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "loader_annotation.h"
 #include "pac.h"
 
 #ifndef BURROW_JBROOT
@@ -548,13 +549,26 @@ static bool should_load(const char *directory, const char *name, CFDictionaryRef
     return length > 0 && (size_t)length < sizeof path && tweak_matches(path, name, process, manager);
 }
 
+// The loader's message for crash reports (see loader_annotation.h). Only the
+// loader's constructor writes it, on one thread. Volatile: nothing in this
+// file reads it back, but crash reporters read it from outside.
+__attribute__((used, section("__DATA,__crash_info"))) static volatile struct burrow_crash_annotations
+    crash_annotations = { .version = BURROW_CRASH_ANNOTATIONS_VERSION };
+static char loading_message[sizeof BURROW_LOADING_PREFIX + MAX_NAME_LENGTH];
+
 static void open_tweak(const char *directory, const char *name) {
     char path[PATH_MAX];
     int length = snprintf(path, sizeof path, "%s/%s%s", directory, name, TWEAK_SUFFIX);
     if (length < 0 || (size_t)length >= sizeof path) {
         return;
     }
-    if (dlopen(path, RTLD_LAZY | RTLD_GLOBAL)) {
+    // Named in crash reports until dlopen returns: a crash in between, in
+    // the tweak's constructor or before it, is the tweak's.
+    snprintf(loading_message, sizeof loading_message, "%s%s", BURROW_LOADING_PREFIX, name);
+    crash_annotations.message = (uint64_t)(uintptr_t)loading_message;
+    void *handle = dlopen(path, RTLD_LAZY | RTLD_GLOBAL);
+    crash_annotations.message = 0;
+    if (handle) {
         os_log_info(OS_LOG_DEFAULT, "Burrow: loaded %{public}s", name);
     } else {
         const char *reason = dlerror();

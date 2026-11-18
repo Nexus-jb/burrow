@@ -4,7 +4,8 @@
 //
 //   loader-target <loader>
 //
-// It prints the test tweaks whose constructors ran, in order, on one line.
+// It prints the test tweaks whose constructors ran, in order, on one line,
+// and the loader's message for crash reports if the loader left one behind.
 // Built twice: as loader-target, which has the Objective-C class
 // BurrowLoaderPlainClass and does not use Foundation, and as LoaderTarget
 // inside LoaderTarget.app, which has a bundle identifier and uses
@@ -14,6 +15,8 @@
 #include <objc/runtime.h>
 #include <stdio.h>
 #include <string.h>
+
+#include "annotation.h"
 
 static char loaded[4096];
 
@@ -42,6 +45,8 @@ int main(int argc, char **argv) {
         fprintf(stderr, "%s\n", dlerror());
         return 4;
     }
-    printf("%s\n", loaded);
+    // Once the loader is done, it names no tweak.
+    const char *left = loader_crash_message();
+    printf("%s%s%s\n", loaded, left ? " left: " : "", left ? left : "");
     return 0;
 }

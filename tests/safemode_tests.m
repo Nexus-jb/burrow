@@ -17,6 +17,8 @@
 #import "safe_mode.h"
 #import "service.h"
 
+#include "loader_annotation.h"
+
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -183,6 +185,33 @@ static void test_fixtures(NSString *fixtures, NSString *scratch) {
                            error:&error]);
     CHECK(error != nil);
     CHECK([[NSData dataWithContentsOfFile:broken] isEqual:before]);
+
+    // A crash while the loader loads a tweak, before the report lists the
+    // tweak among its images: the loader's message names the tweak, and
+    // the crash site is in the Objective-C runtime.
+    BurrowCrashReport *loading = fixture(fixtures, @"loading.ips");
+    CHECK([loading.applicationSpecificInformation[@"BurrowLoader.dylib"] isEqual:@[ @"Burrow is loading Qux" ]]);
+    CHECK(handle(safe_mode, fixtures, @"loading.ips", &event) == BurrowSafeModeTurnedOffTweak);
+    CHECK([event[BurrowSafeModeEventTweak] isEqualToString:@"Qux"]);
+    CHECK([event[BurrowSafeModeEventReason]
+        isEqualToString:@"EXC_BAD_ACCESS (SIGBUS) while it was loading, in libobjc.A.dylib "
+                        @"(readClass(objc_class*, bool, bool) + 92)"]);
+    CHECK([read_plist(settings)[@"DisabledInProcesses"][@"com.apple.springboard"] containsObject:@"Qux"]);
+
+    // The same message while another thread crashed: the tweak counts as
+    // loaded, but it is not blamed.
+    BurrowCrashAnalyzer *analyzer = [[BurrowCrashAnalyzer alloc]
+        initWithTweakDirectories:@[ @"/var/jb/usr/lib/TweakInject" ]
+                  jailbreakRoots:@[ @"/var/jb", RealRoot ]];
+    BurrowCrashAnalysis *elsewhere = [analyzer analyzeReport:fixture(fixtures, @"loading-elsewhere.ips")];
+    CHECK([elsewhere.tweaks isEqual:@[ @"Quux" ]]);
+    CHECK([elsewhere.tweakPaths[@"Quux"] isEqualToString:@"/var/jb/usr/lib/TweakInject/Quux.dylib"]);
+    CHECK(elsewhere.culprit == nil);
+    CHECK(handle(safe_mode, fixtures, @"loading-elsewhere.ips", &event) == BurrowSafeModeNoCulprit);
+
+    // Reports without the loader's message have no application specific
+    // information to speak of.
+    CHECK(segv.applicationSpecificInformation.count == 0);
 }
 
 static NSDictionary *record(BurrowCrashLog *log, NSString *dir, NSString *name) {
@@ -245,6 +274,18 @@ static void test_crash_log(NSString *fixtures, NSString *dpkg, NSString *scratch
     CHECK(log.entries.count == 2);
     CHECK([log.entries.firstObject[BurrowCrashLogProcess] isEqualToString:@"Example"]);
     CHECK(![[NSFileManager defaultManager] fileExistsAtPath:first_copy]);
+
+    // A crash while the loader loaded a tweak that the report does not
+    // list among its images is logged, and blamed on that tweak.
+    BurrowCrashLog *loads = [[BurrowCrashLog alloc] initWithDirectory:[scratch stringByAppendingPathComponent:@"crash-log-loading"]
+                                                             analyzer:analyzer
+                                                             packages:packages];
+    entry = record(loads, fixtures, @"loading.ips");
+    CHECK([entry[BurrowCrashLogTweak] isEqualToString:@"Qux"]);
+    CHECK([entry[BurrowCrashLogTweaks] isEqual:@[ @"Qux" ]]);
+    CHECK([[BurrowCrashLog describeEntry:entry]
+        isEqualToString:@"com.apple.springboard: Qux: EXC_BAD_ACCESS (SIGBUS) while it was loading, in libobjc.A.dylib "
+                        @"(readClass(objc_class*, bool, bool) + 92)"]);
 }
 
 // The burrowd service: every report once, Safe Mode only from a date on.
@@ -408,6 +449,14 @@ static void crash_and_check(BurrowSafeMode *safe_mode, BurrowCrashLog *log, NSSt
     CHECK(report != nil);
     if (!report) {
         return;
+    }
+    // The system's crash reporter took the loader's message, which names
+    // the tweak it was loading, from the loader's __crash_info section.
+    NSString *message = [@BURROW_LOADING_PREFIX stringByAppendingString:tweak];
+    CHECK([report.applicationSpecificInformation[loader.lastPathComponent] containsObject:message]);
+    if (![report.applicationSpecificInformation[loader.lastPathComponent] containsObject:message]) {
+        fprintf(stderr, "[safemode]   application specific information: %s\n",
+                report.applicationSpecificInformation.description.UTF8String);
     }
     BurrowSafeModeAction action = BurrowSafeModeIgnored;
     NSDictionary *event = nil;

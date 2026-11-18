@@ -49,6 +49,9 @@ NS_ASSUME_NONNULL_BEGIN
 // Where an uncaught exception was thrown; empty for other crashes.
 @property (nonatomic, readonly, copy) NSArray<BurrowCrashFrame *> *lastExceptionFrames;
 @property (nonatomic, readonly, copy) NSArray<BurrowCrashImage *> *images;
+// The application specific information: the messages that images left for
+// crash reports, by image name, such as abort() in libsystem_c.dylib.
+@property (nonatomic, readonly, copy) NSDictionary<NSString *, NSArray<NSString *> *> *applicationSpecificInformation;
 
 @end
 

@@ -2,6 +2,8 @@
 
 #import "crash_analysis.h"
 
+#include "loader_annotation.h"
+
 #include <libkern/OSByteOrder.h>
 #include <mach-o/fat.h>
 #include <mach-o/loader.h>
@@ -294,6 +296,38 @@ static BOOL has_any_prefix(NSString *path, NSArray<NSString *> *prefixes) {
     return nil;
 }
 
+// The tweak that Burrow's loader was loading when the process crashed, from
+// the loader's message in the application specific information (see
+// src/loader_annotation.h). *crashedThere is set when the crashed thread
+// runs in the image that left the message: the crash happened while the
+// loader was loading the tweak, before dlopen returned.
+static NSString *tweak_being_loaded(BurrowCrashReport *report, BOOL *crashedThere) {
+    *crashedThere = NO;
+    NSString *prefix = @BURROW_LOADING_PREFIX;
+    NSDictionary<NSString *, NSArray<NSString *> *> *information = report.applicationSpecificInformation;
+    for (NSString *image in [information.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
+        for (NSString *line in information[image]) {
+            if (![line hasPrefix:prefix]) {
+                continue;
+            }
+            NSString *tweak = [line substringFromIndex:prefix.length];
+            // A file name in the tweak directory, as the loader lists them.
+            if (!tweak.length || [tweak hasPrefix:@"."] || [tweak containsString:@"/"]) {
+                continue;
+            }
+            for (BurrowCrashFrame *frame in report.crashedThreadFrames) {
+                NSString *name = frame.image.name ?: frame.image.path.lastPathComponent;
+                if ([name isEqualToString:image]) {
+                    *crashedThere = YES;
+                    break;
+                }
+            }
+            return tweak;
+        }
+    }
+    return nil;
+}
+
 - (BurrowCrashAnalysis *)analyzeReport:(BurrowCrashReport *)report {
     BurrowCrashAnalysis *analysis = [[BurrowCrashAnalysis alloc] init];
     NSMutableSet<NSString *> *tweaks = [NSMutableSet set];
@@ -311,6 +345,19 @@ static BOOL has_any_prefix(NSString *path, NSArray<NSString *> *prefixes) {
             }
         }
     }
+    // A tweak the loader was still loading counts as loaded, though the
+    // report may not list it among the images yet.
+    BOOL crashedWhileLoading = NO;
+    NSString *loading = tweak_being_loaded(report, &crashedWhileLoading);
+    if (loading) {
+        [tweaks addObject:loading];
+        NSString *path = _tweakPaths[loading]
+                             ?: [_tweakDirectories.firstObject
+                                    stringByAppendingPathComponent:[loading stringByAppendingPathExtension:@"dylib"]];
+        if (path && !paths[loading]) {
+            paths[loading] = path;
+        }
+    }
     analysis.tweaks = [tweaks.allObjects sortedArrayUsingSelector:@selector(compare:)];
     analysis.tweakPaths = paths;
 
@@ -323,10 +370,17 @@ static BOOL has_any_prefix(NSString *path, NSArray<NSString *> *prefixes) {
     }
     analysis.culprit = culprit;
     analysis.culpritFrame = culprit ? frame : nil;
+    // Otherwise, a crash on the thread that was loading a tweak is that
+    // tweak's: in its constructor, or in the system while it maps the tweak.
+    BOOL blamedForLoading = !culprit && crashedWhileLoading;
+    if (blamedForLoading) {
+        analysis.culprit = loading;
+    }
 
     // Where it happened: the tweak to blame, or else the first frame past
-    // the crash machinery.
-    BurrowCrashFrame *where = analysis.culpritFrame;
+    // the crash machinery. For a tweak that was loading, the crash site
+    // itself, such as the Objective-C runtime reading the tweak's classes.
+    BurrowCrashFrame *where = blamedForLoading ? report.crashedThreadFrames.firstObject : analysis.culpritFrame;
     for (BurrowCrashFrame *candidate in report.crashedThreadFrames) {
         if (where) {
             break;
@@ -336,6 +390,9 @@ static BOOL has_any_prefix(NSString *path, NSArray<NSString *> *prefixes) {
         }
     }
     NSString *what = what_happened(report);
+    if (blamedForLoading) {
+        what = [what stringByAppendingString:@" while it was loading,"];
+    }
     analysis.reason = shortened(where ? [NSString stringWithFormat:@"%@ in %@", what, location_of(where)] : what);
     return analysis;
 }

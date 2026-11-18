@@ -45,6 +45,24 @@ static NSUUID *uuid_value(NSDictionary *dictionary, NSString *key) {
     return text ? [[NSUUID alloc] initWithUUIDString:text.uppercaseString] : nil;
 }
 
+// The "asi" object: image names and the lines each left. Entries of other
+// types are dropped.
+static NSDictionary<NSString *, NSArray<NSString *> *> *information_from(NSDictionary *asi) {
+    NSMutableDictionary<NSString *, NSArray<NSString *> *> *information = [NSMutableDictionary dictionary];
+    for (id image in asi) {
+        NSMutableArray<NSString *> *lines = [NSMutableArray array];
+        for (id line in typed(asi[image], [NSArray class])) {
+            if ([line isKindOfClass:[NSString class]]) {
+                [lines addObject:line];
+            }
+        }
+        if ([image isKindOfClass:[NSString class]] && lines.count) {
+            information[image] = lines;
+        }
+    }
+    return information;
+}
+
 @interface BurrowCrashImage ()
 @property (nonatomic, readwrite, copy, nullable) NSString *path;
 @property (nonatomic, readwrite, copy, nullable) NSString *name;
@@ -81,6 +99,7 @@ static NSUUID *uuid_value(NSDictionary *dictionary, NSString *key) {
 @property (nonatomic, readwrite, copy) NSArray<BurrowCrashFrame *> *crashedThreadFrames;
 @property (nonatomic, readwrite, copy) NSArray<BurrowCrashFrame *> *lastExceptionFrames;
 @property (nonatomic, readwrite, copy) NSArray<BurrowCrashImage *> *images;
+@property (nonatomic, readwrite, copy) NSDictionary<NSString *, NSArray<NSString *> *> *applicationSpecificInformation;
 @end
 
 @implementation BurrowCrashReport
@@ -124,6 +143,7 @@ static NSUUID *uuid_value(NSDictionary *dictionary, NSString *key) {
     report.crashedThreadFrames = @[];
     report.lastExceptionFrames = @[];
     report.images = @[];
+    report.applicationSpecificInformation = @{};
     if (!report.isCrash) {
         return report;
     }
@@ -162,8 +182,9 @@ static NSUUID *uuid_value(NSDictionary *dictionary, NSString *key) {
     NSDictionary *reason = typed(body[@"exceptionReason"], [NSDictionary class]);
     report.uncaughtExceptionName = string_value(reason, @"name");
     report.uncaughtExceptionReason = string_value(reason, @"composed_message") ?: string_value(reason, @"reason");
+    report.applicationSpecificInformation = information_from(typed(body[@"asi"], [NSDictionary class]));
     if (!report.uncaughtExceptionName.length) {
-        [report readUncaughtException:typed(body[@"asi"], [NSDictionary class])];
+        [report readUncaughtException:report.applicationSpecificInformation];
     }
 
     NSMutableArray<BurrowCrashImage *> *images = [NSMutableArray array];
@@ -216,10 +237,9 @@ static NSUUID *uuid_value(NSDictionary *dictionary, NSString *key) {
 
 // CoreFoundation records "*** Terminating app due to uncaught exception
 // 'Name', reason: 'Reason'" in the application specific information.
-- (void)readUncaughtException:(NSDictionary *)information {
-    for (id lines in information.allValues) {
-        for (id line in typed(lines, [NSArray class])) {
-            NSString *text = typed(line, [NSString class]);
+- (void)readUncaughtException:(NSDictionary<NSString *, NSArray<NSString *> *> *)information {
+    for (NSArray<NSString *> *lines in information.allValues) {
+        for (NSString *text in lines) {
             NSRange start = [text rangeOfString:@"uncaught exception '"];
             if (start.location == NSNotFound) {
                 continue;
