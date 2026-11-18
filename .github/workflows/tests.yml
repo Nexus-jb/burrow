@@ -75,6 +75,9 @@ jobs:
       - name: Build the sample tweak with Theos
         timeout-minutes: 10
         run: make build/ios/BurrowSampleTweak.dylib GNUMAKE="gmake messages=yes" < /dev/null
+      - name: Run the loader tests on macOS
+        timeout-minutes: 10
+        run: make test-loader < /dev/null
       - name: Build and package
         timeout-minutes: 10
         env:
@@ -91,6 +94,7 @@ jobs:
           otool -L build/ios/BurrowSampleTweak.dylib
           otool -l build/ios/BurrowSampleTweak.dylib | grep -A2 LC_RPATH
           nm -gU build/ios/arm64e/frameworks/CydiaSubstrate.framework/CydiaSubstrate
+          ls -lR build/ios/arm64e/loader
       - uses: actions/upload-artifact@v4
         with:
           name: burrow-tests-${{ github.run_number }}
