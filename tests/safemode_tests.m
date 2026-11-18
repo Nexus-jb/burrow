@@ -634,6 +634,10 @@ static void crash_and_check(BurrowSafeMode *safe_mode, BurrowCrashLog *log, NSSt
     if (!report) {
         return;
     }
+    // The crash reporter copied the loader's note: the tweak crashed while
+    // the loader opened it, after Innocent.
+    CHECK([report.burrowLoadingTweak isEqualToString:tweak]);
+    CHECK([report.burrowLoadedTweaks isEqualToArray:@[ @"Innocent" ]]);
     BurrowSafeModeAction action = BurrowSafeModeIgnored;
     NSDictionary *event = nil;
     NSError *error = nil;
@@ -736,7 +740,10 @@ static void test_real_crashes(NSString *dir, NSString *scratch) {
     BOOL crashed = YES;
     NSString *output = run_target(target, loader, &crashed);
     CHECK(!crashed);
-    CHECK([output isEqualToString:@"Innocent"]);
+    // The target prints the tweaks that loaded, then the loader's note.
+    NSArray<NSString *> *lines = [output componentsSeparatedByString:@"\n"];
+    CHECK([lines.firstObject isEqualToString:@"Innocent"]);
+    CHECK([lines.lastObject isEqualToString:@"Burrow loaded tweaks: Innocent"]);
     NSArray *off = read_plist(settings)[@"DisabledInProcesses"][@"crash-target"];
     CHECK([off isEqual:(@[ @"SegvTweak", @"ThrowTweak" ])]);
 }
