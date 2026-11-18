@@ -36,6 +36,16 @@ Tweaks are loaded in the order of their names, compared byte by byte, so
 `000First.dylib` loads before `Alpha.dylib`. Files whose names start with a
 dot are skipped.
 
+A tweak whose property list sets `IsTweakManager` to true, beside `Filter`,
+is a tweak manager: a tweak that decides about other tweaks, such as one
+that turns tweaks off per app. Matching tweak managers are loaded before
+every other tweak, whatever their names, and only when at least one other
+tweak is to be loaded.
+
+When the environment variable `_MSSafeMode` or `_SafeMode` is `1`, the
+convention from Cydia Substrate for starting a process without tweaks, the
+loader loads nothing.
+
 ## Turning tweaks off
 
 The loader settings can only turn tweaks off; they never load a tweak that
@@ -99,13 +109,15 @@ filters from `tests/loader/TweakInject`, and two targets:
   app.
 
 Each test tweak tells the target when its constructor runs. The test program
-runs both targets under ten settings files and checks which tweaks loaded
-and in what order. Among the test tweaks are one with no filter, one with an
-unreadable filter, one with an empty filter, one that is not a library, and
-filters in OpenStep format and with `Mode` set to `Any`.
+runs both targets under eleven settings files and the two safe mode
+variables, and checks which tweaks loaded and in what order. Among the test tweaks are one with no filter, one with an
+unreadable filter, one with an empty filter, one that is not a library, a
+tweak manager whose name sorts last, and filters in OpenStep format and
+with `Mode` set to `Any`.
 
 Device results:
 
 | Device | Chip | iOS | Jailbreak | Build | Result |
 | ------ | ---- | --- | --------- | ----- | ------ |
 | iPhone 14 Pro Max | A16 (arm64 and arm64e tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.31 | All 20 loader checks passed for both architectures, with every other suite |
+| iPhone 14 Pro Max | A16 (arm64 and arm64e tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.48 | All 26 loader checks passed, with tweak managers and the safe mode variables |

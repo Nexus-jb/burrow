@@ -27,7 +27,8 @@ static NSArray<NSString *> *with_real_path(NSString *path) {
 
 + (instancetype)rootlessPaths {
     BurrowServicePaths *paths = [[BurrowServicePaths alloc] init];
-    paths.reportDirectories = @[ @"/var/mobile/Library/Logs/CrashReporter", @"/var/root/Library/Logs/CrashReporter" ];
+    // Reports for every process, root's included, go here.
+    paths.reportDirectories = @[ @"/var/mobile/Library/Logs/CrashReporter" ];
     paths.tweakDirectories = with_real_path(@"/var/jb/usr/lib/TweakInject");
     paths.jailbreakRoots = with_real_path(@"/var/jb");
     paths.dpkgDirectory = @"/var/jb/var/lib/dpkg";

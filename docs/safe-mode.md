@@ -109,9 +109,28 @@ a tweak's developer needs the person's consent and is a separate feature.
 
 ## Running it
 
-The library is built and tested here. The daemon that hands it every new
-crash report is installed together with the loader, in a later step of the
-work plan.
+The Burrow package runs `burrowd`, a launch daemon. It watches
+`/var/mobile/Library/Logs/CrashReporter`, where the system writes the crash
+reports of every process, root's included, and hands every new report to
+the crash log. On its first start it reads the reports already there.
+
+Safe Mode acts only once Burrow's loader is the one loading tweaks: before
+that, turning a tweak off in Burrow's settings would change nothing. It
+then handles crashes from the moment Burrow's loader took over, never older
+ones.
+
+`burrowctl` shows the state:
+
+```
+burrowctl status       the tweak loader and hooking engine in use, burrowd,
+                       the reports it has read, the crash log and Safe Mode
+burrowctl crashes [N]  the N newest crashes with tweaks loaded (10)
+burrowctl events       what Safe Mode turned off, and why
+```
+
+The state lives in `/var/jb/var/lib/burrow`: `crashes/` for the crash log,
+`safe-mode.plist` for Safe Mode, and `burrowd.plist` for what burrowd has
+read.
 
 ## Testing
 
@@ -126,6 +145,8 @@ work plan.
 - The crash log with the same reports and a small dpkg database in
   `tests/safemode/dpkg`: the tweak and package names, the kept copy, the
   skipped reports, and the oldest entries going first.
+- The burrowd service with the same reports: each report handled once,
+  and Safe Mode only for crashes after the date it was turned on.
 - Real crashes: `crash-target` loads three test tweaks through the test
   build of the loader. `SegvTweak` writes through a null pointer and
   `ThrowTweak` throws an uncaught exception; `Innocent` does nothing. The
@@ -141,3 +162,11 @@ Device results:
 | ------ | ---- | --- | --------- | ----- | ------ |
 | iPhone 14 Pro Max | A16 (arm64 and arm64e tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.39 | All 63 checks passed for both architectures, with real crash reports from iOS |
 | iPhone 14 Pro Max | A16 (arm64 and arm64e tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.42 | All 94 checks passed for both architectures; the crash log named each crashing tweak and its package from the device's dpkg database |
+| iPhone 14 Pro Max | A16 | 16.3.1 | Dopamine, rootless, ElleKit loading tweaks | 0.0.0~dev.48 | burrowd read the device's 123 crash reports; `burrow-tests probe` crashed the probe through ElleKit, and burrowd logged the crash within seconds, blaming the probe tweak and naming its package |
+
+`burrow-tests probe` checks burrowd itself on a device with the Burrow
+package installed. The test package puts the tweak `BurrowCrashProbe` in the
+system's tweak directory, with a filter for `burrow-crash-probe` only. The
+command runs that program: the tweak loader in use, whichever it is, loads
+the tweak, the tweak crashes the program, and the command waits for burrowd
+to log the crash and blame the probe tweak.

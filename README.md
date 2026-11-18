@@ -64,6 +64,22 @@ with Xcode, ldid and dpkg, install it, and run `burrow-tests` on the device:
 make ios-tests-package PACKAGE_VERSION=0.0.0~dev.1
 ```
 
+### Development builds on a device
+
+Every CI run builds two rootless packages for a jailbroken device:
+
+- `com.nexusjb.burrow`, Burrow itself. For now it installs beside the
+  jailbreak's own tweak loader and changes nothing the system uses: its
+  daemon keeps the crash log. Run `burrowctl status` to see what it does.
+- `com.nexusjb.burrow-tests`, the tests. Run `burrow-tests` to run them all,
+  or `burrow-tests probe` to check the daemon.
+
+To build them on a Mac with Xcode, ldid and dpkg:
+
+```sh
+make ios-tests-package burrow-package PACKAGE_VERSION=0.0.0~dev.1
+```
+
 [docs/hooking.md](docs/hooking.md) explains how hooks are installed and which
 rules keep them safe. [docs/loader.md](docs/loader.md) explains how the loader
 picks the tweaks for each process, and [docs/safe-mode.md](docs/safe-mode.md)
