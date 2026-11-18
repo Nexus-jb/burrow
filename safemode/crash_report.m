@@ -82,7 +82,7 @@ static NSUUID *uuid_value(NSDictionary *dictionary, NSString *key) {
 @property (nonatomic, readwrite, copy) NSArray<BurrowCrashFrame *> *crashedThreadFrames;
 @property (nonatomic, readwrite, copy) NSArray<BurrowCrashFrame *> *lastExceptionFrames;
 @property (nonatomic, readwrite, copy) NSArray<BurrowCrashImage *> *images;
-@property (nonatomic, copy, nullable) NSArray<NSString *> *burrowLoadedTweaks;
+@property (nonatomic, copy, nullable) NSString *crashedThreadName;
 @property (nonatomic, copy, nullable) NSString *burrowLoadingTweak;
 @end
 
@@ -169,7 +169,6 @@ static NSUUID *uuid_value(NSDictionary *dictionary, NSString *key) {
     if (!report.uncaughtExceptionName.length) {
         [report readUncaughtException:typed(body[@"asi"], [NSDictionary class])];
     }
-    [report readBurrowNote:typed(body[@"asi"], [NSDictionary class])];
 
     NSMutableArray<BurrowCrashImage *> *images = [NSMutableArray array];
     for (id item in typed(body[@"usedImages"], [NSArray class])) {
@@ -195,6 +194,11 @@ static NSUUID *uuid_value(NSDictionary *dictionary, NSString *key) {
         }
     }
     report.crashedThreadFrames = [report framesFrom:typed(crashed[@"frames"], [NSArray class])];
+    report.crashedThreadName = string_value(crashed, @"name");
+    static NSString *const loading = @"Burrow: loading ";
+    if ([report.crashedThreadName hasPrefix:loading] && report.crashedThreadName.length > loading.length) {
+        report.burrowLoadingTweak = [report.crashedThreadName substringFromIndex:loading.length];
+    }
     report.lastExceptionFrames = [report framesFrom:typed(body[@"lastExceptionBacktrace"], [NSArray class])];
     return report;
 }
@@ -221,39 +225,6 @@ static NSUUID *uuid_value(NSDictionary *dictionary, NSString *key) {
 
 // CoreFoundation records "*** Terminating app due to uncaught exception
 // 'Name', reason: 'Reason'" in the application specific information.
-// The loader's crash information message, as src/loader.c writes it:
-// "Burrow loaded tweaks: A, B; loading: C", or "none" for no tweaks yet.
-- (void)readBurrowNote:(NSDictionary *)information {
-    static NSString *const prefix = @"Burrow loaded tweaks: ";
-    for (id lines in information.allValues) {
-        NSArray *list = [lines isKindOfClass:[NSString class]] ? @[ lines ] : typed(lines, [NSArray class]);
-        for (id line in list) {
-            NSString *text = typed(line, [NSString class]);
-            if (![text hasPrefix:prefix]) {
-                continue;
-            }
-            NSString *rest = [text substringFromIndex:prefix.length];
-            NSRange loading = [rest rangeOfString:@"; loading: "];
-            if (loading.location != NSNotFound) {
-                NSString *name = [rest substringFromIndex:NSMaxRange(loading)];
-                self.burrowLoadingTweak = name.length ? name : nil;
-                rest = [rest substringToIndex:loading.location];
-            }
-            NSMutableArray<NSString *> *names = [NSMutableArray array];
-            if (![rest isEqualToString:@"none"]) {
-                for (NSString *name in [rest componentsSeparatedByString:@", "]) {
-                    // "..." ends a list too long for the message.
-                    if (name.length && ![name isEqualToString:@"..."]) {
-                        [names addObject:name];
-                    }
-                }
-            }
-            self.burrowLoadedTweaks = names;
-            return;
-        }
-    }
-}
-
 - (void)readUncaughtException:(NSDictionary *)information {
     for (id lines in information.allValues) {
         for (id line in typed(lines, [NSArray class])) {

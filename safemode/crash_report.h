@@ -53,10 +53,9 @@ NS_ASSUME_NONNULL_BEGIN
 // The images on the threads' stacks. Reports list only those, not every
 // image loaded.
 @property (nonatomic, readonly, copy) NSArray<BurrowCrashImage *> *images;
-// What Burrow's loader noted in the process, when it loaded the tweaks
-// there: the tweaks it loaded, in order, and the one it was opening when the
-// process crashed. Nil when it did not load them.
-@property (nonatomic, readonly, copy, nullable) NSArray<NSString *> *burrowLoadedTweaks;
+@property (nonatomic, readonly, copy, nullable) NSString *crashedThreadName;
+// The tweak Burrow's loader was opening on the crashed thread, which it
+// names "Burrow: loading <tweak>" meanwhile; nil otherwise.
 @property (nonatomic, readonly, copy, nullable) NSString *burrowLoadingTweak;
 
 @end

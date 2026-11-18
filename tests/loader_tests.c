@@ -11,8 +11,12 @@
 // and LoaderTarget.app.
 
 #include <TargetConditionals.h>
+#include <dlfcn.h>
 #include <errno.h>
+#include <libkern/OSByteOrder.h>
 #include <limits.h>
+#include <mach-o/fat.h>
+#include <mach-o/loader.h>
 #include <spawn.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -156,49 +160,15 @@ static bool run_target(const char *target, const char *loader, char *output, siz
     return WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
-// The crash information message for the tweaks in expected, which lists
-// them as they loaded; the old ABI shim is not a tweak.
-static void expected_message(const char *expected, char *message, size_t size) {
-    char copy[1024];
-    snprintf(copy, sizeof copy, "%s", expected);
-    size_t used = (size_t)snprintf(message, size, "Burrow loaded tweaks: ");
-    bool any = false;
-    for (char *save = NULL, *name = strtok_r(copy, " ", &save); name; name = strtok_r(NULL, " ", &save)) {
-        if (strcmp(name, "OldABI") != 0) {
-            used += (size_t)snprintf(message + used, size - used, "%s%s", any ? ", " : "", name);
-            any = true;
-        }
-    }
-    if (!any) {
-        snprintf(message, size, "(none)");
-    }
-}
-
-// Checks which tweaks loaded, and the loader's crash information message
-// after the target closed the loader.
 static void expect(const char *test, const char *label, const char *target, const char *loader,
                    const char *expected) {
-    checks += 2;
-    char output[8192];
+    checks++;
+    char output[4096];
     bool ran = run_target(target, loader, output, sizeof output);
-    char *newline = strchr(output, '\n');
-    const char *message = newline ? newline + 1 : "";
-    if (newline) {
-        *newline = '\0';
-    }
     if (!ran || strcmp(output, expected) != 0) {
         failures++;
         fprintf(stderr, "[loader] %s, %s: expected \"%s\", got \"%s\"%s\n", test, label, expected, output,
                 ran ? "" : " (the target failed)");
-    }
-    char wanted[2048];
-    expected_message(expected, wanted, sizeof wanted);
-    // Without tweaks the loader may leave once it is closed.
-    bool none = strcmp(wanted, "(none)") == 0 && strcmp(message, "(unloaded)") == 0;
-    if (ran && strcmp(message, wanted) != 0 && !none) {
-        failures++;
-        fprintf(stderr, "[loader] %s, %s: expected the crash message \"%s\", got \"%s\"\n", test, label, wanted,
-                message);
     }
 }
 
@@ -206,6 +176,73 @@ static bool join(char *out, const char *dir, const char *name) {
     int length = snprintf(out, PATH_MAX, "%s/%s", dir, name);
     return length > 0 && length < PATH_MAX;
 }
+
+// Writes a Mach-O header: a thin arm64 file with one subtype, or a fat file
+// with one arm64 slice per subtype.
+static bool write_header(const char *path, bool fat, const uint32_t *subtypes, size_t count) {
+    uint8_t data[256] = { 0 };
+    size_t size;
+    if (!fat) {
+        struct mach_header_64 header = { MH_MAGIC_64, CPU_TYPE_ARM64, (cpu_subtype_t)subtypes[0], MH_DYLIB, 0, 0, 0, 0 };
+        memcpy(data, &header, sizeof header);
+        size = sizeof header;
+    } else {
+        struct fat_header header = { OSSwapHostToBigInt32(FAT_MAGIC), OSSwapHostToBigInt32((uint32_t)count) };
+        memcpy(data, &header, sizeof header);
+        for (size_t i = 0; i < count; i++) {
+            struct fat_arch arch = { (cpu_type_t)OSSwapHostToBigInt32((uint32_t)CPU_TYPE_ARM64),
+                                     (cpu_subtype_t)OSSwapHostToBigInt32(subtypes[i]), 0, 0, 0 };
+            memcpy(data + sizeof header + i * sizeof arch, &arch, sizeof arch);
+        }
+        size = sizeof data;
+    }
+    FILE *file = fopen(path, "wb");
+    if (!file) {
+        return false;
+    }
+    bool written = fwrite(data, 1, size, file) == size;
+    return fclose(file) == 0 && written;
+}
+
+// The loader skips tweaks with only the old arm64e ABI when the shim is
+// missing; it reads the ABI from the Mach-O header.
+static void test_old_abi(const char *loader, const char *scratch) {
+    // Without a tweak directory the loader's constructor loads nothing here.
+    unsetenv("BURROW_TEST_TWEAK_DIRECTORY");
+    void *handle = dlopen(loader, RTLD_NOW);
+    bool (*uses_old)(const char *) = handle ? (bool (*)(const char *))dlsym(handle, "burrow_loader_uses_old_arm64e_abi") : NULL;
+    checks++;
+    if (!uses_old) {
+        failures++;
+        fprintf(stderr, "[loader] cannot find burrow_loader_uses_old_arm64e_abi: %s\n", dlerror());
+        return;
+    }
+    struct {
+        const char *name;
+        bool fat;
+        uint32_t subtypes[2];
+        size_t count;
+        bool old;
+    } cases[] = {
+        { "thin old arm64e", false, { 2 }, 1, true },
+        { "thin new arm64e", false, { 0x80000002u }, 1, false },
+        { "thin arm64", false, { 0 }, 1, false },
+        { "fat arm64 and old arm64e", true, { 0, 2 }, 2, true },
+        { "fat old and new arm64e", true, { 2, 0x81000002u }, 2, false },
+        { "fat arm64 only", true, { 0 }, 1, false },
+    };
+    char path[PATH_MAX];
+    join(path, scratch, "header.dylib");
+    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        checks++;
+        if (!write_header(path, cases[i].fat, cases[i].subtypes, cases[i].count) || uses_old(path) != cases[i].old) {
+            failures++;
+            fprintf(stderr, "[loader] old ABI, %s: expected %s\n", cases[i].name, cases[i].old ? "old" : "not old");
+        }
+    }
+    unlink(path);
+}
+
 
 int main(int argc, char **argv) {
     if (argc != 2) {
@@ -254,6 +291,7 @@ int main(int argc, char **argv) {
         }
     }
     unlink(settings);
+    test_old_abi(loader, scratch);
     rmdir(scratch);
 
     if (failures) {

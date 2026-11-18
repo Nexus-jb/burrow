@@ -29,7 +29,8 @@ JSON header line and a JSON body. Safe Mode reads:
   the backtrace where it was thrown;
 - the path and UUID of each image on the threads' stacks. Reports list only
   those images, not everything the process loaded;
-- what Burrow's loader noted in the process (below).
+- the name of the crashed thread, which says when Burrow's loader was
+  opening a tweak (below).
 
 Reports hide parts of some paths, such as `/Users/USER/*/Foo.dylib`, so
 Safe Mode recognizes tweaks by UUID: it reads the UUIDs of every tweak in
@@ -38,22 +39,18 @@ inside the tweak directory is a second way to recognize one.
 
 ## What Burrow's loader leaves in a report
 
-Every image can give the crash reporter a message through its
-`__DATA,__crash_info` section, and the crash reporter copies it into the
-report's application specific information (`asi`). Burrow's loader keeps
-there the tweaks it loaded into the process, in order, and while it opens
-one, which one:
+While Burrow's loader opens a tweak, it names the thread
+`Burrow: loading <tweak>`, and reports keep the name of every thread. A
+crash in dyld or the Objective-C runtime while a tweak was opened, before
+any of its code ran, therefore names that tweak, though no tweak is on a
+stack. Such a crash is how a tweak built with the old arm64e ABI fails
+without the shim (see [loader.md](loader.md)). Thread names are cut at 63
+bytes; a cut name is completed from the tweak directory when only one tweak
+starts with it.
 
-```
-Burrow loaded tweaks: Alpha, Beta; loading: Gamma
-```
-
-So when Burrow's loader is in use, a report names every tweak in the
-process, even when none is on a stack, and a crash in dyld or the
-Objective-C runtime while a tweak was opened, before any of its code ran,
-is blamed on that tweak. Such a crash is how a tweak built with the old
-arm64e ABI fails without the shim (see [loader.md](loader.md)). "Tweaks
-loaded" below means these tweaks and the tweaks on the stacks.
+A message in a library's `__DATA,__crash_info` section would not do: the
+crash reporter of macOS 14 and later leaves out the messages of libraries
+outside the shared cache, as the tests showed on macOS 15.
 
 ## Who is to blame
 
@@ -64,7 +61,7 @@ of an uncaught exception, then in the crashed thread:
 - If the process's own code comes first (its main executable, or an app in
   the app container), the crash is the app's own, and no tweak is blamed.
 - Without a tweak on the stacks, a crash on the thread where Burrow's loader
-  was opening a tweak is blamed on that tweak.
+  was opening a tweak is blamed on that tweak, and its reason says so.
 - Frames from the system, from Burrow and from other libraries of the
   jailbreak are passed over, but at most 12 of them. A tweak further from
   the crash is not blamed: a tweak that hooks a busy method appears in many
@@ -150,10 +147,10 @@ burrowctl status       the tweak loader and hooking engine in use, burrowd,
 burrowctl crashes [N]  the N newest crashes with tweaks loaded (10)
 burrowctl events       what Safe Mode turned off, and why
 burrowctl why NAME     the newest crash report of the process NAME (or a
-                       report file): the exception, the tweaks loaded, the
-                       one to blame, what Burrow's loader noted, the images
-                       on the stacks that are not Apple's, and the crashed
-                       thread
+                       report file): the exception, the tweaks found, the
+                       one to blame, the tweak Burrow's loader was opening,
+                       the images on the stacks that are not Apple's, and
+                       the crashed thread
 burrowctl loaded NAME  the tweak loader, hooking engine and tweaks in the
                        running process NAME
 burrowctl check        the tweaks and the libraries they load that use the

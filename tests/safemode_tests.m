@@ -106,26 +106,22 @@ static void test_fixtures(NSString *fixtures, NSString *scratch) {
     CHECK(segv.date && fabs(segv.date.timeIntervalSince1970 - 1794964211.0) < 1.0);
     NSString *malformed = [fixtures stringByAppendingPathComponent:@"malformed.ips"];
     CHECK([BurrowCrashReport reportWithContentsOfFile:malformed error:NULL] == nil);
-    CHECK(segv.burrowLoadedTweaks == nil && segv.burrowLoadingTweak == nil);
+    CHECK(segv.burrowLoadingTweak == nil);
 
-    // What Burrow's loader notes in the process: the tweaks it loaded, and
-    // the one it was opening when the Objective-C runtime crashed on it.
+    // A crash in the Objective-C runtime while Burrow's loader opened a
+    // tweak: the loader names the thread after it.
     BurrowCrashAnalyzer *analyzer = [[BurrowCrashAnalyzer alloc]
         initWithTweakDirectories:@[ @"/var/jb/usr/lib/TweakInject" ]
                   jailbreakRoots:@[ @"/var/jb", RealRoot ]];
     BurrowCrashReport *load_crash = fixture(fixtures, @"load-crash.ips");
-    CHECK([load_crash.burrowLoadedTweaks isEqualToArray:(@[ @"Alpha", @"Beta" ])]);
+    CHECK([load_crash.crashedThreadName isEqualToString:@"Burrow: loading Gamma"]);
     CHECK([load_crash.burrowLoadingTweak isEqualToString:@"Gamma"]);
     BurrowCrashAnalysis *loading = [analyzer analyzeReport:load_crash];
-    CHECK([loading.tweaks isEqualToArray:(@[ @"Alpha", @"Beta", @"Gamma" ])]);
+    CHECK([loading.tweaks isEqualToArray:@[ @"Gamma" ]]);
     CHECK([loading.culprit isEqualToString:@"Gamma"]);
     CHECK([loading.tweakPaths[@"Gamma"] isEqualToString:@"/var/jb/usr/lib/TweakInject/Gamma.dylib"]);
     CHECK([loading.reason isEqualToString:@"EXC_BAD_ACCESS (SIGBUS) while Gamma was being loaded in dyld "
                                           @"(dyld4::APIs::dlopen_from(char const*, int, void*) + 8)"]);
-    // Tweaks it loaded, though none is on a stack; too many for the message.
-    BurrowCrashAnalysis *noted = [analyzer analyzeReport:fixture(fixtures, @"noted.ips")];
-    CHECK([noted.tweaks isEqualToArray:@[ @"Alpha" ]]);
-    CHECK(noted.culprit == nil);
 
     // A tweak at the crash site is turned off in that process only.
     NSDictionary *event = nil;
@@ -634,10 +630,9 @@ static void crash_and_check(BurrowSafeMode *safe_mode, BurrowCrashLog *log, NSSt
     if (!report) {
         return;
     }
-    // The crash reporter copied the loader's note: the tweak crashed while
-    // the loader opened it, after Innocent.
+    // The tweak crashed while the loader opened it, so the crashed thread
+    // carries the loader's name for it.
     CHECK([report.burrowLoadingTweak isEqualToString:tweak]);
-    CHECK([report.burrowLoadedTweaks isEqualToArray:@[ @"Innocent" ]]);
     if (![report.burrowLoadingTweak isEqualToString:tweak]) {
         // Show what the crash reporter wrote instead.
         NSString *text = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL];
@@ -648,9 +643,11 @@ static void crash_and_check(BurrowSafeMode *safe_mode, BurrowCrashLog *log, NSSt
                                                                               dataUsingEncoding:NSUTF8StringEncoding]
                                                                   options:0
                                                                     error:NULL];
-        fprintf(stderr, "[safemode]   asi %s\n", [body[@"asi"] description].UTF8String ?: "(none)");
-        fprintf(stderr, "[safemode]   keys %s\n", [[body allKeys] componentsJoinedByString:@" "].UTF8String ?: "(none)");
-        fprintf(stderr, "[safemode]   note in file: %s\n", [text containsString:@"Burrow loaded"] ? "yes" : "no");
+        NSUInteger faulting = [body[@"faultingThread"] unsignedIntegerValue];
+        NSArray *threads = body[@"threads"];
+        NSDictionary *thread = faulting < threads.count ? threads[faulting] : nil;
+        fprintf(stderr, "[safemode]   crashed thread name %s, queue %s\n",
+                [thread[@"name"] description].UTF8String ?: "(none)", [thread[@"queue"] description].UTF8String ?: "(none)");
     }
     BurrowSafeModeAction action = BurrowSafeModeIgnored;
     NSDictionary *event = nil;
@@ -754,10 +751,7 @@ static void test_real_crashes(NSString *dir, NSString *scratch) {
     BOOL crashed = YES;
     NSString *output = run_target(target, loader, &crashed);
     CHECK(!crashed);
-    // The target prints the tweaks that loaded, then the loader's note.
-    NSArray<NSString *> *lines = [output componentsSeparatedByString:@"\n"];
-    CHECK([lines.firstObject isEqualToString:@"Innocent"]);
-    CHECK([lines.lastObject isEqualToString:@"Burrow loaded tweaks: Innocent"]);
+    CHECK([output isEqualToString:@"Innocent"]);
     NSArray *off = read_plist(settings)[@"DisabledInProcesses"][@"crash-target"];
     CHECK([off isEqual:(@[ @"SegvTweak", @"ThrowTweak" ])]);
 }

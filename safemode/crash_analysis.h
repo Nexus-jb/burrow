@@ -10,8 +10,8 @@
 NS_ASSUME_NONNULL_BEGIN
 
 @interface BurrowCrashAnalysis : NSObject
-// The tweaks in the process, sorted by name: those on the threads' stacks
-// and, when Burrow's loader loaded the tweaks, every tweak it loaded.
+// The tweaks in the process, sorted by name: those on the threads' stacks,
+// the only images reports list, and the tweak Burrow's loader was opening.
 @property (nonatomic, readonly, copy) NSArray<NSString *> *tweaks;
 // Where each of those tweaks is on disk, when known.
 @property (nonatomic, readonly, copy) NSDictionary<NSString *, NSString *> *tweakPaths;

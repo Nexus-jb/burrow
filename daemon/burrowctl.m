@@ -214,10 +214,8 @@ static int why(BurrowServicePaths *paths, NSString *what) {
     print([NSString stringWithFormat:@"Tweaks:    %@", analysis.tweaks.count ? [analysis.tweaks componentsJoinedByString:@", "]
                                                                             : @"none loaded"]);
     print([NSString stringWithFormat:@"To blame:  %@", analysis.culprit ?: @"no single tweak"]);
-    if (report.burrowLoadedTweaks) {
-        print([NSString stringWithFormat:@"Burrow:    loaded %@%@",
-                                         report.burrowLoadedTweaks.count ? [report.burrowLoadedTweaks componentsJoinedByString:@", "] : @"none",
-                                         report.burrowLoadingTweak ? [@"; was loading " stringByAppendingString:report.burrowLoadingTweak] : @""]);
+    if (report.burrowLoadingTweak) {
+        print([NSString stringWithFormat:@"Loading:   %@ (Burrow's loader was opening it)", report.burrowLoadingTweak]);
     }
     // The images on the threads' stacks that are neither Apple's nor the
     // process itself: reports list no others.

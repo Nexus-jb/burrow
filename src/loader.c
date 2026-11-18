@@ -13,17 +13,22 @@
 // before every other tweak, and only when another tweak is loaded too.
 // Like ElleKit's loader, this one opens the old arm64e ABI shim, when it is
 // installed, after the tweak managers and before the other tweaks: tweaks
-// built with the arm64e ABI from before iOS 14 crash without it.
+// built with the arm64e ABI from before iOS 14 crash without it. Without the
+// shim, it skips such tweaks in arm64e processes.
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <dirent.h>
 #include <dlfcn.h>
+#include <libkern/OSByteOrder.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <mach-o/dyld.h>
+#include <mach-o/fat.h>
+#include <mach-o/loader.h>
 #include <objc/runtime.h>
 #include <os/log.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -561,91 +566,108 @@ static bool should_load(const char *directory, const char *name, CFDictionaryRef
     return length > 0 && (size_t)length < sizeof path && tweak_matches(path, name, process, manager);
 }
 
-// The crash reporter copies the message in every loaded image's
-// __DATA,__crash_info section into the report's application specific
-// information. A report lists only the images on its threads' stacks, so the
-// loader keeps there the tweaks it loaded into the process, in order, and the
-// tweak it is opening, if any:
-//
-//   Burrow loaded tweaks: First, Second; loading: Third
-//
-// That names the tweaks in every crash of the process, and the tweak to blame
-// for a crash in dyld or the Objective-C runtime while a tweak loads. The
-// layout is the crash reporter's annotation structure, version 5.
-struct crash_info {
-    uint64_t version;
-    uint64_t message;
-    uint64_t signature;
-    uint64_t backtrace;
-    uint64_t message2;
-    uint64_t thread;
-    uint64_t dialog_mode;
-    uint64_t abort_cause;
+// cpusubtype of an arm64e slice: the subtype in the low byte and, from the
+// iOS 14 ABI on, a flag for its versioned pointer authentication.
+enum {
+    SUBTYPE_ARM64E = 2,
+    SUBTYPE_PTRAUTH_ABI = (int)0x80000000,
 };
 
-// Named as in Apple's crash reporter client, which the crash reporter looks
-// for; hidden, so each image keeps its own.
-__attribute__((used, visibility("hidden"), section("__DATA,__crash_info"))) struct crash_info gCRAnnotations = {
-    .version = 5
-};
-
-static const char CRASH_PREFIX[] = "Burrow loaded tweaks: ";
-enum { CRASH_MESSAGE_SIZE = 4096 };
-static char crash_messages[2][CRASH_MESSAGE_SIZE];
-static int crash_current;
-
-// Writes the message into the buffer not in use, then points the structure
-// at it, so that a crash report always reads a whole message.
-static void note_tweaks(char *const *names, const size_t *loaded, size_t count, const char *loading) {
-    char *message = crash_messages[crash_current ^ 1];
-    size_t used = (size_t)snprintf(message, CRASH_MESSAGE_SIZE, "%s", CRASH_PREFIX);
-    // Leave room for the tweak being opened.
-    const size_t limit = CRASH_MESSAGE_SIZE - (MAX_NAME_LENGTH + 32);
-    for (size_t i = 0; i < count; i++) {
-        size_t length = strlen(names[loaded[i]]);
-        if (used + length + 2 > limit) {
-            used += (size_t)snprintf(message + used, CRASH_MESSAGE_SIZE - used, ", ...");
-            break;
+// Whether a library's arm64e code uses only the ABI from before iOS 14. A
+// library with a slice for each ABI loads the new one.
+static bool uses_old_arm64e_abi(const char *path) {
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        return false;
+    }
+    uint8_t head[4096];
+    ssize_t got = read(fd, head, sizeof head);
+    close(fd);
+    if (got < (ssize_t)sizeof(struct mach_header_64)) {
+        return false;
+    }
+    uint32_t magic;
+    memcpy(&magic, head, sizeof magic);
+    if (magic == MH_MAGIC_64) {
+        struct mach_header_64 header;
+        memcpy(&header, head, sizeof header);
+        return header.cputype == CPU_TYPE_ARM64 && (header.cpusubtype & 0xff) == SUBTYPE_ARM64E &&
+               !(header.cpusubtype & SUBTYPE_PTRAUTH_ABI);
+    }
+    // Fat headers are big-endian; both entry layouts start with the CPU type
+    // and subtype.
+    magic = OSSwapBigToHostInt32(magic);
+    if (magic != FAT_MAGIC && magic != FAT_MAGIC_64) {
+        return false;
+    }
+    struct fat_header fat;
+    memcpy(&fat, head, sizeof fat);
+    uint32_t count = OSSwapBigToHostInt32(fat.nfat_arch);
+    size_t entry = magic == FAT_MAGIC ? sizeof(struct fat_arch) : sizeof(struct fat_arch_64);
+    bool old = false;
+    for (uint32_t i = 0; i < count && sizeof fat + (i + 1) * entry <= (size_t)got; i++) {
+        uint32_t words[2];
+        memcpy(words, head + sizeof fat + i * entry, sizeof words);
+        uint32_t type = OSSwapBigToHostInt32(words[0]), subtype = OSSwapBigToHostInt32(words[1]);
+        if (type != (uint32_t)CPU_TYPE_ARM64 || (subtype & 0xff) != SUBTYPE_ARM64E) {
+            continue;
         }
-        used += (size_t)snprintf(message + used, CRASH_MESSAGE_SIZE - used, "%s%s", i ? ", " : "", names[loaded[i]]);
+        if (subtype & (uint32_t)SUBTYPE_PTRAUTH_ABI) {
+            return false;
+        }
+        old = true;
     }
-    if (count == 0) {
-        used += (size_t)snprintf(message + used, CRASH_MESSAGE_SIZE - used, "none");
-    }
-    if (loading) {
-        snprintf(message + used, CRASH_MESSAGE_SIZE - used, "; loading: %s", loading);
-    }
-    crash_current ^= 1;
-    gCRAnnotations.message = (uint64_t)(uintptr_t)message;
+    return old;
 }
 
-// Jailbreaks close the loader once its constructor returns. With tweaks
-// loaded, it stays, so that its message is in the process's crash reports.
-static void stay_loaded(void) {
-    Dl_info info;
-    if (dladdr((const void *)&gCRAnnotations, &info) && info.dli_fname &&
-        !dlopen(info.dli_fname, RTLD_LAZY | RTLD_NOLOAD | RTLD_NODELETE)) {
-        const char *reason = dlerror();
-        os_log_error(OS_LOG_DEFAULT, "Burrow: the loader cannot stay loaded: %{public}s",
-                     reason ? reason : "unknown error");
-    }
+#ifdef BURROW_LOADER_TESTING
+// Test builds only: lets the loader tests check the ABI reading.
+__attribute__((visibility("default"))) bool burrow_loader_uses_old_arm64e_abi(const char *path);
+bool burrow_loader_uses_old_arm64e_abi(const char *path) {
+    return uses_old_arm64e_abi(path);
 }
+#endif
 
-static bool open_tweak(const char *directory, const char *name) {
+static void open_tweak(const char *directory, const char *name, bool old_abi_shim_loaded) {
     char path[PATH_MAX];
     int length = snprintf(path, sizeof path, "%s/%s%s", directory, name, TWEAK_SUFFIX);
     if (length < 0 || (size_t)length >= sizeof path) {
-        return false;
+        return;
     }
+#if defined(__arm64e__)
+    // Without the shim, such a tweak crashes this process in the Objective-C
+    // runtime while it loads; skipping it keeps the process running.
+    if (!old_abi_shim_loaded && uses_old_arm64e_abi(path)) {
+        os_log_error(OS_LOG_DEFAULT,
+                     "Burrow: %{public}s is built with the old arm64e ABI and the OldABI shim is not installed, "
+                     "so it is not loaded",
+                     name);
+        return;
+    }
+#else
+    (void)old_abi_shim_loaded;
+#endif
+    // Crash reports name each thread but list only the images on the
+    // threads' stacks. Naming the thread after the tweak while it opens
+    // names the tweak in a crash in dyld or the Objective-C runtime, before
+    // any of its code runs. (Messages in a library's __crash_info section
+    // would not do: the crash reporter of macOS 14 and later leaves out
+    // those of libraries outside the shared cache.)
+    char previous[64] = "";
+    pthread_getname_np(pthread_self(), previous, sizeof previous);
+    char loading[64];
+    snprintf(loading, sizeof loading, "Burrow: loading %s", name);
+    pthread_setname_np(loading);
     // The same mode as ElleKit's loader, which tweaks are tested with.
-    if (dlopen(path, RTLD_LAZY)) {
+    void *handle = dlopen(path, RTLD_LAZY);
+    pthread_setname_np(previous);
+    if (handle) {
         os_log_info(OS_LOG_DEFAULT, "Burrow: loaded %{public}s", name);
-        return true;
+    } else {
+        const char *reason = dlerror();
+        os_log_error(OS_LOG_DEFAULT, "Burrow: %{public}s cannot be loaded: %{public}s", name,
+                     reason ? reason : "unknown error");
     }
-    const char *reason = dlerror();
-    os_log_error(OS_LOG_DEFAULT, "Burrow: %{public}s cannot be loaded: %{public}s", name,
-                 reason ? reason : "unknown error");
-    return false;
 }
 
 static void free_names(char **names, size_t count) {
@@ -672,8 +694,6 @@ static void load_tweaks(const char *directory, const char *settings_path, const 
     } else {
         enum { SKIP, LOAD, LOAD_FIRST };
         unsigned char *plan = calloc(count, 1);
-        size_t *loaded = calloc(count, sizeof *loaded);
-        size_t loaded_count = 0;
         bool others = false;
         for (size_t i = 0; plan && i < count; i++) {
             bool manager;
@@ -684,31 +704,22 @@ static void load_tweaks(const char *directory, const char *settings_path, const 
         }
         // Tweak managers first, and only for the sake of other tweaks; then
         // the old ABI shim; then the other tweaks.
-        for (int pass = LOAD_FIRST; plan && loaded && others && pass >= LOAD; pass--) {
-            if (pass == LOAD && old_abi_shim && access(old_abi_shim, F_OK) == 0 && !dlopen(old_abi_shim, RTLD_LAZY)) {
-                const char *reason = dlerror();
-                os_log_error(OS_LOG_DEFAULT, "Burrow: the old ABI shim cannot be loaded: %{public}s",
-                             reason ? reason : "unknown error");
+        bool shim_loaded = false;
+        for (int pass = LOAD_FIRST; plan && others && pass >= LOAD; pass--) {
+            if (pass == LOAD && old_abi_shim && access(old_abi_shim, F_OK) == 0) {
+                shim_loaded = dlopen(old_abi_shim, RTLD_LAZY) != NULL;
+                if (!shim_loaded) {
+                    const char *reason = dlerror();
+                    os_log_error(OS_LOG_DEFAULT, "Burrow: the old ABI shim cannot be loaded: %{public}s",
+                                 reason ? reason : "unknown error");
+                }
             }
             for (size_t i = 0; i < count; i++) {
-                if (plan[i] != pass) {
-                    continue;
-                }
-                note_tweaks(names, loaded, loaded_count, names[i]);
-                if (open_tweak(directory, names[i])) {
-                    loaded[loaded_count++] = i;
-                }
-                if (loaded_count) {
-                    note_tweaks(names, loaded, loaded_count, NULL);
-                } else {
-                    gCRAnnotations.message = 0;
+                if (plan[i] == pass) {
+                    open_tweak(directory, names[i], shim_loaded);
                 }
             }
         }
-        if (loaded_count) {
-            stay_loaded();
-        }
-        free(loaded);
         free(plan);
     }
     if (settings) {

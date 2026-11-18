@@ -322,17 +322,20 @@ static BOOL has_any_prefix(NSString *path, NSArray<NSString *> *prefixes) {
             }
         }
     }
-    // Burrow's loader names every tweak it loaded, and the one it was opening.
-    NSMutableArray<NSString *> *noted = [NSMutableArray arrayWithArray:report.burrowLoadedTweaks ?: @[]];
-    if (report.burrowLoadingTweak) {
-        [noted addObject:report.burrowLoadingTweak];
+    // The tweak Burrow's loader was opening. Thread names are cut at 63
+    // bytes, so a long name is completed from the tweak directory.
+    NSString *opening = report.burrowLoadingTweak;
+    if (opening && !_tweakPaths[opening]) {
+        NSArray<NSString *> *longer = [_tweakPaths.allKeys
+            filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"self BEGINSWITH %@", opening]];
+        opening = longer.count == 1 ? longer.firstObject : opening;
     }
-    for (NSString *tweak in noted) {
-        [tweaks addObject:tweak];
-        if (!paths[tweak]) {
-            paths[tweak] = _tweakPaths[tweak]
-                               ?: [_tweakDirectories.firstObject
-                                      stringByAppendingPathComponent:[tweak stringByAppendingPathExtension:@"dylib"]];
+    if (opening) {
+        [tweaks addObject:opening];
+        if (!paths[opening]) {
+            paths[opening] = _tweakPaths[opening]
+                                 ?: [_tweakDirectories.firstObject
+                                        stringByAppendingPathComponent:[opening stringByAppendingPathExtension:@"dylib"]];
         }
     }
     analysis.tweaks = [tweaks.allObjects sortedArrayUsingSelector:@selector(compare:)];
@@ -348,8 +351,8 @@ static BOOL has_any_prefix(NSString *path, NSArray<NSString *> *prefixes) {
     // A crash in dyld or the Objective-C runtime while Burrow's loader opened
     // a tweak, before any of its code ran: that tweak is to blame.
     BOOL loading = NO;
-    if (!culprit && report.burrowLoadingTweak && crashed_in_loader(report)) {
-        culprit = report.burrowLoadingTweak;
+    if (!culprit && opening && crashed_in_loader(report)) {
+        culprit = opening;
         frame = nil;
         loading = YES;
     }

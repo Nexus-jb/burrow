@@ -8,15 +8,11 @@
     "signal": "SIGBUS",
     "subtype": "UNKNOWN_0x105 at 0x00000000dac11a30"
   },
-  "asi": {
-    "BurrowLoader.dylib": [
-      "Burrow loaded tweaks: Alpha, Beta; loading: Gamma"
-    ]
-  },
   "faultingThread": 0,
   "threads": [
     {
       "triggered": true,
+      "name": "Burrow: loading Gamma",
       "frames": [
         {
           "imageOffset": 4096,
