@@ -27,7 +27,9 @@ JSON header line and a JSON body. Safe Mode reads:
   reason when the report has them (reports from iOS 16 do not);
 - the crashed thread's frames and, for an uncaught Objective-C exception,
   the backtrace where it was thrown;
-- every loaded image's path and UUID.
+- the images the report lists, with their paths and UUIDs. Reports from
+  iOS 16 list only the images that the backtraces use (seen on a device),
+  so a tweak with none of its code on a thread's stack may be missing.
 
 Reports hide parts of some paths, such as `/Users/USER/*/Foo.dylib`, so
 Safe Mode recognizes tweaks by UUID: it reads the UUIDs of every tweak in
@@ -48,6 +50,15 @@ of an uncaught exception, then in the crashed thread:
   backtraces without causing the crash. Frames in the crash machinery
   (`abort`, `libc++abi`, `libobjc`) do not count.
 
+A crash on a thread that runs in Burrow's loader happened while the loader
+was loading tweaks. It may come before the tweak being loaded runs any
+code, as when the Objective-C runtime fails while it maps the tweak's
+classes; then no frame and no image of the report names the tweak. Such a
+crash counts as a crash with tweaks loaded even when the report names
+none, and its reason gives the crash site itself:
+
+    EXC_BAD_ACCESS (SIGBUS) while the loader was loading tweaks, in libobjc.A.dylib (readClass(objc_class*, bool, bool) + 92)
+
 When one tweak is to blame, Safe Mode adds it to `DisabledInProcesses` in
 the loader settings (see [loader.md](loader.md)) for the crashed process,
 named by its bundle identifier or, without one, its executable name. The
@@ -56,8 +67,8 @@ tweak keeps working everywhere else.
 ## Repeated crashes
 
 When a process crashes three times within two minutes with tweaks loaded
-and no single tweak to blame, Safe Mode turns every tweak off in that
-process (`*`). This is the safety net for crash loops it cannot explain,
+(or while the loader was loading them) and no single tweak to blame, Safe
+Mode turns every tweak off in that process (`*`). This is the safety net for crash loops it cannot explain,
 such as SpringBoard crashing on every start.
 
 Reports from processes with no tweak loaded, and reports that are not
@@ -141,7 +152,9 @@ read.
   uncaught exception thrown by a tweak through a jailbreak library, both
   exception formats, a crash in the app's own code, a tweak frame too deep
   to blame, a crash loop, a process without tweaks, a hang report, a broken
-  report, the same report twice, and settings that are not valid.
+  report, the same report twice, settings that are not valid, and crashes
+  in the Objective-C runtime while the loader loads tweaks: three on the
+  loader's thread, one on another thread.
 - The crash log with the same reports and a small dpkg database in
   `tests/safemode/dpkg`: the tweak and package names, the kept copy, the
   skipped reports, and the oldest entries going first.

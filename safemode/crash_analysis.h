@@ -19,6 +19,11 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly, nullable) BurrowCrashFrame *culpritFrame;
 // One line for people: what happened and where.
 @property (nonatomic, readonly, copy) NSString *reason;
+// The crashed thread was in Burrow's loader, loading tweaks. Such a crash
+// counts as one with tweaks loaded, though the report may name none: it
+// lists only the images that its backtraces use, and a crash while dyld or
+// the Objective-C runtime maps a tweak comes before any of its code runs.
+@property (nonatomic, readonly) BOOL crashedWhileLoading;
 @end
 
 @interface BurrowCrashAnalyzer : NSObject

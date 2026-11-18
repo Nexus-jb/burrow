@@ -93,7 +93,7 @@ static NSError *crash_log_error(NSString *description) {
         return YES;
     }
     BurrowCrashAnalysis *analysis = [_analyzer analyzeReport:report];
-    if (!analysis.tweaks.count) {
+    if (!analysis.tweaks.count && !analysis.crashedWhileLoading) {
         return YES;
     }
     NSFileManager *files = [NSFileManager defaultManager];
@@ -188,6 +188,9 @@ static NSError *crash_log_error(NSString *description) {
     NSString *tweak = entry[BurrowCrashLogTweak];
     if (!tweak) {
         NSArray *tweaks = entry[BurrowCrashLogTweaks];
+        if (![tweaks isKindOfClass:[NSArray class]] || !tweaks.count) {
+            return [NSString stringWithFormat:@"%@: no single tweak to blame: %@", process, entry[BurrowCrashLogReason]];
+        }
         return [NSString stringWithFormat:@"%@: no single tweak to blame (loaded: %@): %@", process,
                                           [tweaks componentsJoinedByString:@", "], entry[BurrowCrashLogReason]];
     }

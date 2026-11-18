@@ -213,7 +213,7 @@ static void keep_last(NSMutableArray *list, NSUInteger count) {
         return YES;
     }
     BurrowCrashAnalysis *analysis = [_analyzer analyzeReport:report];
-    if (!analysis.tweaks.count) {
+    if (!analysis.tweaks.count && !analysis.crashedWhileLoading) {
         return YES;
     }
     int lock = [self lock:error];
