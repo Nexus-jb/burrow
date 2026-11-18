@@ -3,6 +3,7 @@
 # make                 build the static library
 # make test            run every test (arm64 Linux or macOS)
 # make test-relocation run the relocation unit tests (any host)
+# make test-loader     run the loader tests (macOS)
 #
 # Cross-testing from another Linux machine:
 #   make test CC=aarch64-linux-gnu-gcc RUN="qemu-aarch64 -L /usr/aarch64-linux-gnu"
@@ -29,30 +30,34 @@ endif
 PORTABLE := src/arm64.c src/relocate.c src/memory_common.c
 OBJC := src/objc.c src/objc_stubs.S
 COMPAT := src/compat.c src/symbols.c
+LOADER_TEST_SOURCES := src/loader.c tests/loader/tweak.c tests/loader/target.c tests/loader_tests.c \
+	$(wildcard tests/loader/TweakInject/*.plist) scripts/build-loader-tests.sh tests/ios.entitlements
 DARWIN_LIBRARY := $(PORTABLE) src/hook.c src/memory_darwin.c $(OBJC)
 
 ifeq ($(shell uname -s),Darwin)
 LIBRARY := $(DARWIN_LIBRARY) $(COMPAT)
 LDLIBS += -lobjc
 OBJC_TESTS := $(BUILD)/objc-tests
+LOADER_TESTS := test-loader
 else
 LIBRARY := $(PORTABLE) src/hook.c src/memory_linux.c
 LDLIBS += -pthread
 OBJC_TESTS :=
+LOADER_TESTS :=
 endif
 
 IOS_CC ?= xcrun --sdk iphoneos clang
 IOS_ARCHS := arm64 arm64e
 IOS_BUILD := $(BUILD)/ios
 IOS_PROGRAMS := hook-tests relocation-tests objc-tests substrate-tests \
-	frameworks/CydiaSubstrate.framework/CydiaSubstrate
+	frameworks/CydiaSubstrate.framework/CydiaSubstrate loader/loader-tests BurrowLoader.dylib
 LDID ?= ldid
 GNUMAKE ?= gmake
 PACKAGE_VERSION ?= 0.0.0~dev
 HEADERS := $(wildcard include/burrow/*.h src/*.h)
 MODES := direct island adrp abs adrp-far abs-far
 
-.PHONY: all test test-relocation ios-tests ios-tests-package clean
+.PHONY: all test test-relocation test-loader ios-tests ios-tests-package clean
 
 all: $(BUILD)/libburrow.a
 
@@ -80,7 +85,14 @@ test-relocation: $(BUILD)/relocation-tests
 $(BUILD)/objc-tests: tests/objc_tests.c $(LIBRARY) $(HEADERS) | $(BUILD)/lib
 	$(CC) $(COMMON) $(CFLAGS) tests/objc_tests.c $(LIBRARY) -o $@ $(LDFLAGS) $(LDLIBS)
 
-test: test-relocation $(BUILD)/hook-tests $(OBJC_TESTS)
+# The loader tests build their own set of programs (see the script).
+$(BUILD)/loader/loader-tests: $(LOADER_TEST_SOURCES) $(HEADERS)
+	scripts/build-loader-tests.sh $(BUILD)/loader macos $(CC)
+
+test-loader: $(BUILD)/loader/loader-tests
+	$(RUN) $(BUILD)/loader/loader-tests $(BUILD)/loader
+
+test: test-relocation $(BUILD)/hook-tests $(OBJC_TESTS) $(LOADER_TESTS)
 	@for mode in $(MODES); do $(RUN) $(BUILD)/hook-tests $$mode || exit 1; done
 	@for program in $(OBJC_TESTS); do $(RUN) $$program || exit 1; done
 
@@ -112,6 +124,16 @@ $(IOS_BUILD)/%/substrate-tests: tests/substrate_tests.c $(HEADERS) tests/ios.ent
 	mkdir -p $(@D)
 	$(IOS_CC) -arch $* -mios-version-min=15.0 $(COMMON) $(CFLAGS) tests/substrate_tests.c -o $@ -lobjc
 	$(LDID) -Stests/ios.entitlements $@
+
+# The tweak loader, with the jailbreak's tweak directory built in.
+$(IOS_BUILD)/%/BurrowLoader.dylib: src/loader.c $(HEADERS)
+	mkdir -p $(@D)
+	$(IOS_CC) -arch $* -mios-version-min=15.0 $(COMMON) -fvisibility=hidden $(CFLAGS) -dynamiclib \
+		-install_name @rpath/BurrowLoader.dylib src/loader.c -o $@ -framework CoreFoundation -lobjc
+	$(LDID) -S $@
+
+$(IOS_BUILD)/%/loader/loader-tests: $(LOADER_TEST_SOURCES) $(HEADERS)
+	LDID="$(LDID)" scripts/build-loader-tests.sh $(IOS_BUILD)/$*/loader ios $(IOS_CC) -arch $* -mios-version-min=15.0
 
 # The sample tweak, built with Theos (needs THEOS and GNU Make 4).
 $(IOS_BUILD)/BurrowSampleTweak.dylib: tests/tweak/Tweak.x tests/tweak/Makefile

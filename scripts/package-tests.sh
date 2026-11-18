@@ -7,8 +7,8 @@
 #   scripts/package-tests.sh <build-dir> <version> <out-dir>
 #
 # <build-dir> holds one directory per architecture (arm64 and arm64e), each
-# with the signed test programs and Burrow built as CydiaSubstrate.framework,
-# and the sample tweak BurrowSampleTweak.dylib.
+# with the signed test programs, Burrow built as CydiaSubstrate.framework and
+# the loader tests in loader/, and the sample tweak BurrowSampleTweak.dylib.
 # After installing the package, run "burrow-tests" in a terminal.
 
 set -eu
@@ -29,7 +29,7 @@ if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+(\.[0-9]+){1,3}([~+][0-9A-Za-z.
     exit 1
 fi
 architectures="arm64 arm64e"
-programs="hook-tests relocation-tests objc-tests substrate-tests frameworks/CydiaSubstrate.framework/CydiaSubstrate"
+programs="hook-tests relocation-tests objc-tests substrate-tests frameworks/CydiaSubstrate.framework/CydiaSubstrate loader/loader-tests"
 for arch in $architectures; do
     for program in $programs; do
         if [ ! -f "$build/$arch/$program" ]; then
@@ -55,6 +55,8 @@ for arch in $architectures; do
         cp "$build/$arch/$program" "$libexec/$arch/$program"
         chmod 0755 "$libexec/$arch/$program"
     done
+    # The rest of the loader test set: the loader, test tweaks and targets.
+    cp -R "$build/$arch/loader/." "$libexec/$arch/loader/"
 done
 cp "$build/BurrowSampleTweak.dylib" "$libexec/BurrowSampleTweak.dylib"
 chmod 0755 "$libexec/BurrowSampleTweak.dylib"
@@ -64,23 +66,30 @@ cat > "$stage/var/jb/usr/bin/burrow-tests" <<'SCRIPT'
 # SPDX-License-Identifier: Apache-2.0
 # Runs Burrow's tests on this device, built for arm64 and for arm64e.
 failed=0
+total=0
+run() {
+    total=$((total + 1))
+    "$@" || failed=$((failed + 1))
+}
 uname -m
 for arch in arm64 arm64e; do
     dir=/var/jb/usr/libexec/burrow-tests/$arch
     echo "== $arch"
-    "$dir/relocation-tests" || failed=$((failed + 1))
+    run "$dir/relocation-tests"
     for mode in direct island adrp abs adrp-far abs-far; do
-        "$dir/hook-tests" "$mode" || failed=$((failed + 1))
+        run "$dir/hook-tests" "$mode"
     done
-    "$dir/objc-tests" || failed=$((failed + 1))
+    run "$dir/objc-tests"
     # The sample tweak's CydiaSubstrate.framework resolves to Burrow.
-    DYLD_FRAMEWORK_PATH="$dir/frameworks" "$dir/substrate-tests" \
-        /var/jb/usr/libexec/burrow-tests/BurrowSampleTweak.dylib || failed=$((failed + 1))
+    export DYLD_FRAMEWORK_PATH="$dir/frameworks"
+    run "$dir/substrate-tests" /var/jb/usr/libexec/burrow-tests/BurrowSampleTweak.dylib
+    unset DYLD_FRAMEWORK_PATH
+    run "$dir/loader/loader-tests" "$dir/loader"
 done
 if [ "$failed" -eq 0 ]; then
     echo "Burrow tests: all passed"
 else
-    echo "Burrow tests: $failed of 18 programs failed"
+    echo "Burrow tests: $failed of $total programs failed"
     exit 1
 fi
 SCRIPT
