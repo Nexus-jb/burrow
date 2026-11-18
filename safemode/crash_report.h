@@ -7,8 +7,16 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+// A loaded image. Crash reports may hide part of a path, as in
+// "/Users/USER/*/Foo.dylib", so the UUID is what identifies an image.
+@interface BurrowCrashImage : NSObject
+@property (nonatomic, readonly, copy, nullable) NSString *path;
+@property (nonatomic, readonly, copy, nullable) NSString *name;
+@property (nonatomic, readonly, copy, nullable) NSUUID *uuid;
+@end
+
 @interface BurrowCrashFrame : NSObject
-@property (nonatomic, readonly, copy, nullable) NSString *imagePath;
+@property (nonatomic, readonly, nullable) BurrowCrashImage *image;
 @property (nonatomic, readonly) unsigned long long imageOffset;
 @property (nonatomic, readonly, copy, nullable) NSString *symbol;
 @property (nonatomic, readonly) unsigned long long symbolOffset;
@@ -24,6 +32,9 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly) BOOL isCrash;
 @property (nonatomic, readonly, copy) NSString *processName;
 @property (nonatomic, readonly, copy, nullable) NSString *bundleIdentifier;
+@property (nonatomic, readonly, copy, nullable) NSString *processPath;
+// The UUID of the main executable.
+@property (nonatomic, readonly, copy, nullable) NSUUID *mainImageUUID;
 @property (nonatomic, readonly, copy, nullable) NSString *incident;
 @property (nonatomic, readonly, copy, nullable) NSDate *date;
 @property (nonatomic, readonly, copy, nullable) NSString *exceptionType;
@@ -34,7 +45,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly, copy) NSArray<BurrowCrashFrame *> *crashedThreadFrames;
 // Where an uncaught exception was thrown; empty for other crashes.
 @property (nonatomic, readonly, copy) NSArray<BurrowCrashFrame *> *lastExceptionFrames;
-@property (nonatomic, readonly, copy) NSArray<NSString *> *imagePaths;
+@property (nonatomic, readonly, copy) NSArray<BurrowCrashImage *> *images;
 
 @end
 

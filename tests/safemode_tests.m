@@ -92,7 +92,8 @@ static void test_fixtures(NSString *fixtures, NSString *scratch) {
     CHECK([segv.bundleIdentifier isEqualToString:@"com.apple.springboard"]);
     CHECK([segv.signalName isEqualToString:@"SIGSEGV"]);
     CHECK(segv.crashedThreadFrames.count == 3);
-    CHECK(segv.imagePaths.count == 13);
+    CHECK(segv.images.count == 13);
+    CHECK([segv.mainImageUUID isEqual:segv.images.firstObject.uuid]);
     CHECK(segv.date && fabs(segv.date.timeIntervalSince1970 - 1794964211.0) < 1.0);
     NSString *malformed = [fixtures stringByAppendingPathComponent:@"malformed.ips"];
     CHECK([BurrowCrashReport reportWithContentsOfFile:malformed error:NULL] == nil);
@@ -287,9 +288,10 @@ static void crash_and_check(BurrowSafeMode *safe_mode, NSString *target, NSStrin
     } else {
         fprintf(stderr, "[safemode] %s: action %ld, culprit %s\n", path.lastPathComponent.UTF8String, (long)action,
                 [safe_mode culpritOfReport:report frame:NULL].UTF8String ?: "none");
-        for (NSString *image in report.imagePaths) {
-            if ([image containsString:@"Tweak"] || [image containsString:@"Innocent"] || [image containsString:@"crash-target"]) {
-                fprintf(stderr, "[safemode]   image %s\n", image.UTF8String);
+        for (BurrowCrashImage *image in report.images) {
+            if ([image.name containsString:@"Tweak"] || [image.name containsString:@"Innocent"]) {
+                fprintf(stderr, "[safemode]   image %s %s\n", image.path.UTF8String ?: "(none)",
+                        image.uuid.UUIDString.UTF8String ?: "(no uuid)");
             }
         }
         NSUInteger shown = 0;
@@ -297,7 +299,7 @@ static void crash_and_check(BurrowSafeMode *safe_mode, NSString *target, NSStrin
             if (shown++ == 4) {
                 break;
             }
-            fprintf(stderr, "[safemode]   frame %s %s\n", frame.imagePath.UTF8String ?: "(none)", frame.symbol.UTF8String ?: "");
+            fprintf(stderr, "[safemode]   frame %s %s\n", frame.image.path.UTF8String ?: "(none)", frame.symbol.UTF8String ?: "");
         }
     }
     // The report was made by this test; leave no trace of it.

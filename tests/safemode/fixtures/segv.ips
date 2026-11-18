@@ -1,8 +1,8 @@
-{"app_name":"SpringBoard","timestamp":"2026-11-17 20:10:11.00 -0500","app_version":"1.0","bug_type":"309","os_version":"iPhone OS 16.3.1 (20D67)","name":"SpringBoard","incident_id":"11111111-2222-3333-4444-000000000001","bundleID":"com.apple.springboard"}
+{"app_name":"SpringBoard","timestamp":"2026-11-17 20:10:11.00 -0500","app_version":"1.0","bug_type":"309","os_version":"iPhone OS 16.3.1 (20D67)","name":"SpringBoard","incident_id":"11111111-2222-3333-4444-000000000001","bundleID":"com.apple.springboard","slice_uuid":"00000000-0000-0000-0000-000000000000"}
 {
   "uptime": 1000,
   "procName": "SpringBoard",
-  "procPath": "/SpringBoard",
+  "procPath": "/System/Library/CoreServices/SpringBoard.app/SpringBoard",
   "captureTime": "2026-11-17 20:10:11.4560 -0500",
   "exception": {
     "type": "EXC_BAD_ACCESS",

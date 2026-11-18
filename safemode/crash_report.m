@@ -40,8 +40,22 @@ static NSDate *parse_date(NSString *text) {
     return [formatter dateFromString:plain];
 }
 
+static NSUUID *uuid_value(NSDictionary *dictionary, NSString *key) {
+    NSString *text = string_value(dictionary, key);
+    return text ? [[NSUUID alloc] initWithUUIDString:text.uppercaseString] : nil;
+}
+
+@interface BurrowCrashImage ()
+@property (nonatomic, readwrite, copy, nullable) NSString *path;
+@property (nonatomic, readwrite, copy, nullable) NSString *name;
+@property (nonatomic, readwrite, copy, nullable) NSUUID *uuid;
+@end
+
+@implementation BurrowCrashImage
+@end
+
 @interface BurrowCrashFrame ()
-@property (nonatomic, readwrite, copy, nullable) NSString *imagePath;
+@property (nonatomic, readwrite, nullable) BurrowCrashImage *image;
 @property (nonatomic, readwrite) unsigned long long imageOffset;
 @property (nonatomic, readwrite, copy, nullable) NSString *symbol;
 @property (nonatomic, readwrite) unsigned long long symbolOffset;
@@ -54,6 +68,8 @@ static NSDate *parse_date(NSString *text) {
 @property (nonatomic, readwrite) BOOL isCrash;
 @property (nonatomic, readwrite, copy) NSString *processName;
 @property (nonatomic, readwrite, copy, nullable) NSString *bundleIdentifier;
+@property (nonatomic, readwrite, copy, nullable) NSString *processPath;
+@property (nonatomic, readwrite, copy, nullable) NSUUID *mainImageUUID;
 @property (nonatomic, readwrite, copy, nullable) NSString *incident;
 @property (nonatomic, readwrite, copy, nullable) NSDate *date;
 @property (nonatomic, readwrite, copy, nullable) NSString *exceptionType;
@@ -62,7 +78,7 @@ static NSDate *parse_date(NSString *text) {
 @property (nonatomic, readwrite, copy, nullable) NSString *uncaughtExceptionReason;
 @property (nonatomic, readwrite, copy) NSArray<BurrowCrashFrame *> *crashedThreadFrames;
 @property (nonatomic, readwrite, copy) NSArray<BurrowCrashFrame *> *lastExceptionFrames;
-@property (nonatomic, readwrite, copy) NSArray<NSString *> *imagePaths;
+@property (nonatomic, readwrite, copy) NSArray<BurrowCrashImage *> *images;
 @end
 
 @implementation BurrowCrashReport
@@ -100,10 +116,11 @@ static NSDate *parse_date(NSString *text) {
     report.processName = string_value(header, @"name") ?: string_value(header, @"app_name") ?: @"";
     report.bundleIdentifier = string_value(header, @"bundleID");
     report.incident = string_value(header, @"incident_id") ?: string_value(header, @"incident");
+    report.mainImageUUID = uuid_value(header, @"slice_uuid");
     report.date = parse_date(string_value(header, @"timestamp") ?: @"");
     report.crashedThreadFrames = @[];
     report.lastExceptionFrames = @[];
-    report.imagePaths = @[];
+    report.images = @[];
     if (!report.isCrash) {
         return report;
     }
@@ -120,6 +137,7 @@ static NSDate *parse_date(NSString *text) {
     if (process.length) {
         report.processName = process;
     }
+    report.processPath = string_value(body, @"procPath");
     NSString *identifier = string_value(typed(body[@"bundleInfo"], [NSDictionary class]), @"CFBundleIdentifier");
     if (identifier.length) {
         report.bundleIdentifier = identifier;
@@ -137,12 +155,16 @@ static NSDate *parse_date(NSString *text) {
     report.signalName = string_value(exception, @"signal");
     [report readUncaughtException:typed(body[@"asi"], [NSDictionary class])];
 
-    NSMutableArray<NSString *> *paths = [NSMutableArray array];
-    for (id image in typed(body[@"usedImages"], [NSArray class])) {
-        NSString *path = string_value(typed(image, [NSDictionary class]), @"path");
-        [paths addObject:path ?: @""];
+    NSMutableArray<BurrowCrashImage *> *images = [NSMutableArray array];
+    for (id item in typed(body[@"usedImages"], [NSArray class])) {
+        NSDictionary *entry = typed(item, [NSDictionary class]);
+        BurrowCrashImage *image = [[BurrowCrashImage alloc] init];
+        image.path = string_value(entry, @"path");
+        image.name = string_value(entry, @"name") ?: image.path.lastPathComponent;
+        image.uuid = uuid_value(entry, @"uuid");
+        [images addObject:image];
     }
-    report.imagePaths = paths;
+    report.images = images;
 
     NSArray *threads = typed(body[@"threads"], [NSArray class]);
     NSNumber *faulting = number_value(body, @"faultingThread");
@@ -170,9 +192,8 @@ static NSDate *parse_date(NSString *text) {
         }
         BurrowCrashFrame *frame = [[BurrowCrashFrame alloc] init];
         NSNumber *image_index = number_value(entry, @"imageIndex");
-        if (image_index && image_index.integerValue >= 0 && (NSUInteger)image_index.integerValue < self.imagePaths.count) {
-            NSString *path = self.imagePaths[(NSUInteger)image_index.integerValue];
-            frame.imagePath = path.length ? path : nil;
+        if (image_index && image_index.integerValue >= 0 && (NSUInteger)image_index.integerValue < self.images.count) {
+            frame.image = self.images[(NSUInteger)image_index.integerValue];
         }
         frame.imageOffset = [number_value(entry, @"imageOffset") unsignedLongLongValue];
         frame.symbol = string_value(entry, @"symbol");

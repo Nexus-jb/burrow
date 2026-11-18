@@ -1,8 +1,8 @@
-{"app_name":"Example","timestamp":"2026-11-17 20:12:00.1000 -0500","app_version":"1.0","bug_type":"309","os_version":"iPhone OS 16.3.1 (20D67)","name":"Example","incident_id":"11111111-2222-3333-4444-000000000002","bundleID":"com.example.app"}
+{"app_name":"Example","timestamp":"2026-11-17 20:12:00.1000 -0500","app_version":"1.0","bug_type":"309","os_version":"iPhone OS 16.3.1 (20D67)","name":"Example","incident_id":"11111111-2222-3333-4444-000000000002","bundleID":"com.example.app","slice_uuid":"00000000-0000-0000-0000-000000000008"}
 {
   "uptime": 1000,
   "procName": "Example",
-  "procPath": "/Example",
+  "procPath": "/private/var/containers/Bundle/Application/5E6F/Example.app/Example",
   "captureTime": "2026-11-17 20:12:00.1000 -0500",
   "exception": {
     "type": "EXC_CRASH",

@@ -3,7 +3,11 @@
 #import "safe_mode.h"
 
 #include <fcntl.h>
+#include <libkern/OSByteOrder.h>
+#include <mach-o/fat.h>
+#include <mach-o/loader.h>
 #include <math.h>
+#include <string.h>
 #include <sys/file.h>
 #include <unistd.h>
 
@@ -80,6 +84,78 @@ static BOOL settings_are_valid(id settings) {
     return YES;
 }
 
+// The UUIDs of every architecture slice in a Mach-O file.
+static void add_slice_uuids(NSData *data, uint64_t offset, NSMutableArray<NSUUID *> *uuids) {
+    const uint8_t *bytes = data.bytes;
+    if (offset > data.length || data.length - offset < sizeof(struct mach_header_64)) {
+        return;
+    }
+    struct mach_header header;
+    memcpy(&header, bytes + offset, sizeof header);
+    uint64_t cursor = offset;
+    if (header.magic == MH_MAGIC_64) {
+        cursor += sizeof(struct mach_header_64);
+    } else if (header.magic == MH_MAGIC) {
+        cursor += sizeof(struct mach_header);
+    } else {
+        return;
+    }
+    uint64_t end = cursor + header.sizeofcmds;
+    if (end > data.length) {
+        return;
+    }
+    for (uint32_t i = 0; i < header.ncmds && end - cursor >= sizeof(struct load_command); i++) {
+        struct load_command command;
+        memcpy(&command, bytes + cursor, sizeof command);
+        if (command.cmdsize < sizeof command || command.cmdsize > end - cursor) {
+            return;
+        }
+        if (command.cmd == LC_UUID && command.cmdsize >= sizeof(struct uuid_command)) {
+            struct uuid_command uuid;
+            memcpy(&uuid, bytes + cursor, sizeof uuid);
+            [uuids addObject:[[NSUUID alloc] initWithUUIDBytes:uuid.uuid]];
+        }
+        cursor += command.cmdsize;
+    }
+}
+
+static NSArray<NSUUID *> *uuids_of_file(NSString *path) {
+    NSData *data = [NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:NULL];
+    NSMutableArray<NSUUID *> *uuids = [NSMutableArray array];
+    if (data.length < sizeof(struct fat_header)) {
+        return uuids;
+    }
+    const uint8_t *bytes = data.bytes;
+    struct fat_header fat;
+    memcpy(&fat, bytes, sizeof fat);
+    uint32_t magic = OSSwapBigToHostInt32(fat.magic);
+    if (magic != FAT_MAGIC && magic != FAT_MAGIC_64) {
+        add_slice_uuids(data, 0, uuids);
+        return uuids;
+    }
+    // Fat headers are big-endian.
+    uint32_t count = OSSwapBigToHostInt32(fat.nfat_arch);
+    size_t entry = magic == FAT_MAGIC ? sizeof(struct fat_arch) : sizeof(struct fat_arch_64);
+    for (uint32_t i = 0; i < count && i < 32; i++) {
+        uint64_t at = sizeof fat + (uint64_t)i * entry;
+        if (at + entry > data.length) {
+            break;
+        }
+        uint64_t offset;
+        if (magic == FAT_MAGIC) {
+            struct fat_arch arch;
+            memcpy(&arch, bytes + at, sizeof arch);
+            offset = OSSwapBigToHostInt32(arch.offset);
+        } else {
+            struct fat_arch_64 arch;
+            memcpy(&arch, bytes + at, sizeof arch);
+            offset = OSSwapBigToHostInt64(arch.offset);
+        }
+        add_slice_uuids(data, offset, uuids);
+    }
+    return uuids;
+}
+
 static NSString *shortened(NSString *text) {
     if (text.length <= MaxReasonLength) {
         return text;
@@ -89,6 +165,7 @@ static NSString *shortened(NSString *text) {
 
 @implementation BurrowSafeMode {
     NSArray<NSString *> *_tweakDirectories;
+    NSDictionary<NSUUID *, NSString *> *_tweakUUIDs;
     NSArray<NSString *> *_jailbreakRoots;
     NSString *_settingsPath;
     NSString *_statePath;
@@ -110,6 +187,7 @@ static NSString *shortened(NSString *text) {
         }
         _tweakDirectories = directories;
         _jailbreakRoots = roots;
+        _tweakUUIDs = [self readTweakUUIDs];
         _settingsPath = [settingsPath copy];
         _statePath = [statePath copy];
     }
@@ -118,43 +196,84 @@ static NSString *shortened(NSString *text) {
 
 #pragma mark Blame
 
-- (BurrowImageKind)kindOfImage:(NSString *)path tweak:(NSString **)tweak {
-    if (!path.length) {
+// Every tweak in the tweak directories, by the UUIDs of its slices.
+- (NSDictionary<NSUUID *, NSString *> *)readTweakUUIDs {
+    NSMutableDictionary<NSUUID *, NSString *> *tweaks = [NSMutableDictionary dictionary];
+    NSFileManager *files = [NSFileManager defaultManager];
+    for (NSString *directory in _tweakDirectories) {
+        for (NSString *name in [files contentsOfDirectoryAtPath:directory error:NULL]) {
+            if ([name hasPrefix:@"."] || ![name.pathExtension isEqualToString:@"dylib"]) {
+                continue;
+            }
+            for (NSUUID *uuid in uuids_of_file([directory stringByAppendingPathComponent:name])) {
+                tweaks[uuid] = name.stringByDeletingPathExtension;
+            }
+        }
+    }
+    return tweaks;
+}
+
+static BOOL has_any_prefix(NSString *path, NSArray<NSString *> *prefixes) {
+    for (NSString *prefix in prefixes) {
+        if ([path hasPrefix:prefix]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+- (BurrowImageKind)kindOfImage:(BurrowCrashImage *)image
+                      inReport:(BurrowCrashReport *)report
+                         tweak:(NSString **)tweak {
+    if (!image) {
         return BurrowImageUnknown;
     }
-    if ([path.pathExtension isEqualToString:@"dylib"] &&
+    NSString *path = image.path ?: @"";
+    NSString *name = image.uuid ? _tweakUUIDs[image.uuid] : nil;
+    if (!name && [path.pathExtension isEqualToString:@"dylib"] &&
         [_tweakDirectories containsObject:path.stringByDeletingLastPathComponent]) {
+        name = path.lastPathComponent.stringByDeletingPathExtension;
+    }
+    if (name) {
         if (tweak) {
-            *tweak = path.lastPathComponent.stringByDeletingPathExtension;
+            *tweak = name;
         }
         return BurrowImageTweak;
+    }
+    static NSArray<NSString *> *system;
+    static NSArray<NSString *> *apps;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        system = @[ @"/System/", @"/usr/lib/", @"/usr/libexec/", @"/Applications/", @"/private/preboot/Cryptexes/",
+                    @"/Developer/", @"/Library/Apple/" ];
+        apps = @[ @"/private/var/containers/Bundle/Application/", @"/var/containers/Bundle/Application/" ];
+    });
+    if (has_any_prefix(path, system)) {
+        return BurrowImageSystem;
+    }
+    BOOL main = (image.uuid && [image.uuid isEqual:report.mainImageUUID]) ||
+                (path.length && [path isEqualToString:report.processPath]);
+    if (main || has_any_prefix(path, apps)) {
+        return BurrowImageOther;
     }
     for (NSString *root in _jailbreakRoots) {
         if ([path hasPrefix:[root stringByAppendingString:@"/"]]) {
             return BurrowImageJailbreak;
         }
     }
-    static NSArray<NSString *> *system;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        system = @[ @"/System/", @"/usr/lib/", @"/usr/libexec/", @"/Applications/", @"/private/preboot/Cryptexes/",
-                    @"/Developer/", @"/Library/Apple/" ];
-    });
-    for (NSString *prefix in system) {
-        if ([path hasPrefix:prefix]) {
-            return BurrowImageSystem;
-        }
-    }
-    return BurrowImageOther;
+    // A path the report hid, or one Safe Mode cannot place.
+    return BurrowImageUnknown;
 }
 
 // Walks frames from the crash site. The first tweak found is to blame,
 // unless the process's own code or too many other frames come first.
-- (NSString *)culpritInFrames:(NSArray<BurrowCrashFrame *> *)frames frame:(BurrowCrashFrame **)found {
+- (NSString *)culpritInFrames:(NSArray<BurrowCrashFrame *> *)frames
+                     inReport:(BurrowCrashReport *)report
+                        frame:(BurrowCrashFrame **)found {
     NSUInteger skipped = 0;
     for (BurrowCrashFrame *frame in frames) {
         NSString *tweak = nil;
-        switch ([self kindOfImage:frame.imagePath tweak:&tweak]) {
+        switch ([self kindOfImage:frame.image inReport:report tweak:&tweak]) {
         case BurrowImageTweak:
             if (found) {
                 *found = frame;
@@ -181,13 +300,13 @@ static NSString *shortened(NSString *text) {
     }
     // Where an uncaught exception was thrown says more than where the
     // process stopped.
-    NSString *tweak = [self culpritInFrames:report.lastExceptionFrames frame:frame];
-    return tweak ?: [self culpritInFrames:report.crashedThreadFrames frame:frame];
+    NSString *tweak = [self culpritInFrames:report.lastExceptionFrames inReport:report frame:frame];
+    return tweak ?: [self culpritInFrames:report.crashedThreadFrames inReport:report frame:frame];
 }
 
 - (BOOL)reportLoadedTweaks:(BurrowCrashReport *)report {
-    for (NSString *path in report.imagePaths) {
-        if ([self kindOfImage:path tweak:NULL] == BurrowImageTweak) {
+    for (BurrowCrashImage *image in report.images) {
+        if ([self kindOfImage:image inReport:report tweak:NULL] == BurrowImageTweak) {
             return YES;
         }
     }
@@ -208,7 +327,7 @@ static NSString *shortened(NSString *text) {
     } else {
         what = @"a crash";
     }
-    NSString *image = frame.imagePath.lastPathComponent ?: @"?";
+    NSString *image = frame.image.name ?: frame.image.path.lastPathComponent ?: @"?";
     NSString *where = frame.symbol.length
                           ? [NSString stringWithFormat:@"%@ (%@ + %llu)", image, frame.symbol, frame.symbolOffset]
                           : [NSString stringWithFormat:@"%@ + 0x%llx", image, frame.imageOffset];
