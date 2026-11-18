@@ -18,4 +18,10 @@ NSArray<NSString *> *_Nullable BurrowMappedFiles(pid_t pid);
 // slice.
 NSString *_Nullable BurrowArm64eABI(NSString *path);
 
+// The libraries under one of the roots that a Mach-O file loads, directly or
+// through other libraries, as dyld would find them from its arm64e slice
+// (or its first slice without one). Libraries loaded through
+// @executable_path are left out: they depend on the process.
+NSArray<NSString *> *BurrowJailbreakLibraries(NSString *path, NSArray<NSString *> *roots);
+
 NS_ASSUME_NONNULL_END

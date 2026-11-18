@@ -51,8 +51,8 @@ Before the first tweak that is not a tweak manager, the loader opens
 loader does. Tweaks built for arm64e with the ABI from before iOS 14 crash
 without it, in the Objective-C runtime, while they are loaded. Tweaks are
 opened with `RTLD_LAZY`, the mode ElleKit's loader uses.
-`burrowctl check` lists the tweaks with the old ABI and with two
-`CoreFoundationVersion` numbers.
+`burrowctl check` lists the tweaks, and the libraries they load, with the old
+ABI, and the tweaks with two `CoreFoundationVersion` numbers.
 
 Tweaks are loaded in the order of their names, compared byte by byte, so
 `000First.dylib` loads before `Alpha.dylib`. Files whose names start with a

@@ -420,9 +420,50 @@ static void test_switch(NSString *scratch) {
     CHECK(![files destinationOfSymbolicLinkAtPath:diverted error:NULL]);
 }
 
+// A thin 64-bit Mach-O library with the given cpusubtype and load
+// commands, each a command number and its string.
+static NSData *macho_library(uint32_t subtype, NSArray<NSArray *> *commands) {
+    NSMutableData *body = [NSMutableData data];
+    for (NSArray *command in commands) {
+        uint32_t cmd = [command[0] unsignedIntValue];
+        const char *text = [command[1] UTF8String];
+        uint32_t fixed = cmd == LC_RPATH ? sizeof(struct rpath_command) : sizeof(struct dylib_command);
+        uint32_t size = (uint32_t)((fixed + strlen(text) + 1 + 7) & ~(size_t)7);
+        NSMutableData *one = [NSMutableData dataWithLength:size];
+        uint32_t words[3] = { cmd, size, fixed };
+        memcpy(one.mutableBytes, words, sizeof words);
+        memcpy((char *)one.mutableBytes + fixed, text, strlen(text));
+        [body appendData:one];
+    }
+    struct mach_header_64 header = { MH_MAGIC_64, CPU_TYPE_ARM64, (cpu_subtype_t)subtype, MH_DYLIB,
+                                     (uint32_t)commands.count, (uint32_t)body.length, 0, 0 };
+    NSMutableData *data = [NSMutableData dataWithBytes:&header length:sizeof header];
+    [data appendData:body];
+    return data;
+}
+
 // Reading what a process has loaded, on this very process, and reading
-// arm64e ABIs from Mach-O headers.
+// arm64e ABIs and linked libraries from Mach-O headers.
 static void test_inspect(NSString *scratch) {
+    // A tweak that loads a library through its run path; that library loads
+    // another next to it, and a system library that is left out.
+    NSString *lib = [scratch stringByAppendingPathComponent:@"lib"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:lib withIntermediateDirectories:YES attributes:nil error:NULL];
+    NSString *tweak = [scratch stringByAppendingPathComponent:@"Linked.dylib"];
+    NSString *dependency = [lib stringByAppendingPathComponent:@"Dependency.dylib"];
+    NSString *deeper = [lib stringByAppendingPathComponent:@"Deeper.dylib"];
+    [macho_library(0x80000002u, @[ @[ @(LC_RPATH), @"/nonexistent" ], @[ @(LC_RPATH), @"@loader_path/lib" ],
+                                   @[ @(LC_LOAD_DYLIB), @"@rpath/Dependency.dylib" ],
+                                   @[ @(LC_LOAD_DYLIB), @"@rpath/Missing.dylib" ] ]) writeToFile:tweak atomically:YES];
+    [macho_library(2, @[ @[ @(LC_LOAD_DYLIB), @"/usr/lib/libSystem.B.dylib" ],
+                         @[ @(LC_LOAD_WEAK_DYLIB), @"@loader_path/Deeper.dylib" ],
+                         @[ @(LC_LOAD_DYLIB), @"@executable_path/Elsewhere.dylib" ] ]) writeToFile:dependency atomically:YES];
+    [macho_library(0x80000002u, @[ @[ @(LC_LOAD_DYLIB), @"@rpath/Dependency.dylib" ] ]) writeToFile:deeper atomically:YES];
+    NSArray<NSString *> *libraries = BurrowJailbreakLibraries(tweak, @[ scratch ]);
+    CHECK([libraries isEqualToArray:(@[ dependency, deeper ])]);
+    CHECK([BurrowArm64eABI(dependency) isEqualToString:@"old"]);
+    CHECK(BurrowJailbreakLibraries(tweak, @[ @"/nonexistent" ]).count == 0);
+
     uint8_t thin[32] = { 0 };
     uint32_t magic = MH_MAGIC_64, type = CPU_TYPE_ARM64;
     memcpy(thin, &magic, 4);

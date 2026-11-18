@@ -5,7 +5,10 @@
 #include <libkern/OSByteOrder.h>
 #include <mach-o/fat.h>
 #include <mach-o/loader.h>
+#include <fcntl.h>
 #include <stddef.h>
+#include <string.h>
+#include <unistd.h>
 #include <sys/param.h>
 #include <sys/sysctl.h>
 
@@ -191,4 +194,182 @@ NSString *BurrowArm64eABI(NSString *path) {
         found = abi ?: found;
     }
     return found;
+}
+
+static NSData *read_at(int fd, uint64_t offset, size_t length) {
+    NSMutableData *data = [NSMutableData dataWithLength:length];
+    ssize_t got = pread(fd, data.mutableBytes, length, (off_t)offset);
+    if (got < 0) {
+        return nil;
+    }
+    data.length = (NSUInteger)got;
+    return data;
+}
+
+// Where the slice to read starts: the arm64e slice of a fat file, or its
+// first slice without one, or 0 for a thin file.
+static BOOL slice_offset(int fd, uint64_t *offset) {
+    NSData *head = read_at(fd, 0, 4096);
+    if (head.length < sizeof(struct fat_header)) {
+        return NO;
+    }
+    struct fat_header fat;
+    memcpy(&fat, head.bytes, sizeof fat);
+    uint32_t magic = OSSwapBigToHostInt32(fat.magic);
+    if (magic != FAT_MAGIC && magic != FAT_MAGIC_64) {
+        *offset = 0;
+        return YES;
+    }
+    uint32_t count = OSSwapBigToHostInt32(fat.nfat_arch);
+    size_t entry = magic == FAT_MAGIC ? sizeof(struct fat_arch) : sizeof(struct fat_arch_64);
+    BOOL found = NO;
+    for (uint32_t i = 0; i < count && sizeof fat + (i + 1) * entry <= head.length; i++) {
+        const uint8_t *at = (const uint8_t *)head.bytes + sizeof fat + i * entry;
+        uint32_t type, subtype;
+        uint64_t start;
+        memcpy(&type, at, 4);
+        memcpy(&subtype, at + 4, 4);
+        if (magic == FAT_MAGIC) {
+            uint32_t start32;
+            memcpy(&start32, at + 8, 4);
+            start = OSSwapBigToHostInt32(start32);
+        } else {
+            memcpy(&start, at + 8, 8);
+            start = OSSwapBigToHostInt64(start);
+        }
+        BOOL arm64e = OSSwapBigToHostInt32(type) == (uint32_t)CPU_TYPE_ARM64 &&
+                      (OSSwapBigToHostInt32(subtype) & 0xff) == BURROW_SUBTYPE_ARM64E;
+        if (!found || arm64e) {
+            *offset = start;
+            found = YES;
+        }
+        if (arm64e) {
+            break;
+        }
+    }
+    return found;
+}
+
+static NSData *read_load_commands(NSString *path, uint32_t *count) {
+    int fd = open(path.fileSystemRepresentation, O_RDONLY);
+    if (fd < 0) {
+        return nil;
+    }
+    NSData *commands = nil;
+    uint64_t offset;
+    if (slice_offset(fd, &offset)) {
+        NSData *data = read_at(fd, offset, sizeof(struct mach_header_64));
+        struct mach_header_64 header;
+        if (data.length == sizeof header) {
+            memcpy(&header, data.bytes, sizeof header);
+            if (header.magic == MH_MAGIC_64 && header.sizeofcmds <= (1u << 20)) {
+                commands = read_at(fd, offset + sizeof header, header.sizeofcmds);
+                if (commands.length != header.sizeofcmds) {
+                    commands = nil;
+                }
+                *count = header.ncmds;
+            }
+        }
+    }
+    close(fd);
+    return commands;
+}
+
+// The string a load command points to, if it ends inside the command.
+static NSString *command_string(NSData *commands, size_t at, uint32_t size, uint32_t offset) {
+    if (offset >= size) {
+        return nil;
+    }
+    const char *start = (const char *)commands.bytes + at + offset;
+    size_t length = strnlen(start, size - offset);
+    if (length == size - offset) {
+        return nil;
+    }
+    return [[NSString alloc] initWithBytes:start length:length encoding:NSUTF8StringEncoding];
+}
+
+static NSString *expand_loader_path(NSString *name, NSString *directory) {
+    if ([name hasPrefix:@"@loader_path"]) {
+        return [directory stringByAppendingString:[name substringFromIndex:@"@loader_path".length]]
+            .stringByStandardizingPath;
+    }
+    return [name hasPrefix:@"@"] ? nil : name.stringByStandardizingPath;
+}
+
+static BOOL under_roots(NSString *path, NSArray<NSString *> *roots) {
+    NSArray<NSString *> *forms = @[ path, path.stringByResolvingSymlinksInPath ];
+    for (NSString *root in roots) {
+        for (NSString *base in @[ root, root.stringByResolvingSymlinksInPath ]) {
+            for (NSString *form in forms) {
+                if ([form isEqualToString:base] || [form hasPrefix:[base stringByAppendingString:@"/"]]) {
+                    return YES;
+                }
+            }
+        }
+    }
+    return NO;
+}
+
+static void collect_libraries(NSString *path, NSArray<NSString *> *inherited, NSArray<NSString *> *roots,
+                              NSMutableOrderedSet<NSString *> *found, NSUInteger depth) {
+    uint32_t count = 0;
+    NSData *commands = depth < 16 ? read_load_commands(path, &count) : nil;
+    if (!commands) {
+        return;
+    }
+    NSString *directory = path.stringByDeletingLastPathComponent;
+    // dyld searches an image's own run paths first, then those of the
+    // images that loaded it.
+    NSMutableArray<NSString *> *rpaths = [NSMutableArray array];
+    NSMutableArray<NSString *> *names = [NSMutableArray array];
+    size_t cursor = 0;
+    for (uint32_t i = 0; i < count && cursor + 12 <= commands.length; i++) {
+        uint32_t words[3];
+        memcpy(words, (const uint8_t *)commands.bytes + cursor, sizeof words);
+        uint32_t cmd = words[0], size = words[1];
+        if (size < 12 || cursor + size > commands.length) {
+            break;
+        }
+        NSString *text = command_string(commands, cursor, size, words[2]);
+        if (cmd == LC_RPATH) {
+            NSString *rpath = text ? expand_loader_path(text, directory) : nil;
+            if (rpath) {
+                [rpaths addObject:rpath];
+            }
+        } else if ((cmd == LC_LOAD_DYLIB || cmd == LC_LOAD_WEAK_DYLIB || cmd == LC_REEXPORT_DYLIB ||
+                    cmd == LC_LOAD_UPWARD_DYLIB) && text) {
+            [names addObject:text];
+        }
+        cursor += size;
+    }
+    [rpaths addObjectsFromArray:inherited];
+    NSFileManager *files = [NSFileManager defaultManager];
+    for (NSString *name in names) {
+        NSString *library = nil;
+        if ([name hasPrefix:@"@rpath/"]) {
+            NSString *rest = [name substringFromIndex:@"@rpath/".length];
+            for (NSString *rpath in rpaths) {
+                NSString *candidate = [rpath stringByAppendingPathComponent:rest];
+                if ([files fileExistsAtPath:candidate]) {
+                    library = candidate;
+                    break;
+                }
+            }
+        } else {
+            library = expand_loader_path(name, directory);
+        }
+        if (!library || [found containsObject:library] || ![files fileExistsAtPath:library] ||
+            !under_roots(library, roots)) {
+            continue;
+        }
+        [found addObject:library];
+        collect_libraries(library, rpaths, roots, found, depth + 1);
+    }
+}
+
+NSArray<NSString *> *BurrowJailbreakLibraries(NSString *path, NSArray<NSString *> *roots) {
+    NSMutableOrderedSet<NSString *> *found = [NSMutableOrderedSet orderedSetWithObject:path];
+    collect_libraries(path, @[], roots, found, 0);
+    [found removeObject:path];
+    return found.array;
 }

@@ -8,7 +8,8 @@
 //   burrowctl events          what Safe Mode turned off, and why
 //   burrowctl loaded NAME     the tweak loader, hooking engine and tweaks in
 //                             the running processes called NAME (as root)
-//   burrowctl check           the tweaks that need the old arm64e ABI shim and
+//   burrowctl check           the tweaks and libraries that need the old arm64e
+//                             ABI shim and
 //                             whether it is installed, the tweaks no loader
 //                             loads for their version range, and the tweak
 //                             managers
@@ -213,6 +214,22 @@ static int why(BurrowServicePaths *paths, NSString *what) {
     print([NSString stringWithFormat:@"Tweaks:    %@", analysis.tweaks.count ? [analysis.tweaks componentsJoinedByString:@", "]
                                                                             : @"none loaded"]);
     print([NSString stringWithFormat:@"To blame:  %@", analysis.culprit ?: @"no single tweak"]);
+    // Everything but Apple's images and the process itself, in the report's
+    // order: a crash while a library loads shows what had come in with it.
+    NSArray<NSString *> *apple = @[ @"/System/", @"/usr/lib/", @"/usr/libexec/", @"/Applications/",
+                                    @"/private/preboot/Cryptexes/", @"/Developer/", @"/Library/Apple/" ];
+    NSMutableArray<NSString *> *others = [NSMutableArray array];
+    for (BurrowCrashImage *image in report.images) {
+        NSString *imagePath = image.path ?: @"";
+        BOOL system = [image.uuid isEqual:report.mainImageUUID];
+        for (NSString *prefix in apple) {
+            system = system || [imagePath hasPrefix:prefix];
+        }
+        if (!system) {
+            [others addObject:image.name ?: (imagePath.length ? imagePath.lastPathComponent : @"?")];
+        }
+    }
+    print([NSString stringWithFormat:@"Others:    %@", others.count ? [others componentsJoinedByString:@", "] : @"none"]);
     print(@"Crashed thread:");
     NSUInteger shown = 0;
     for (BurrowCrashFrame *frame in report.crashedThreadFrames) {
@@ -242,6 +259,7 @@ static int check(BurrowServicePaths *paths) {
     NSMutableArray<NSString *> *old = [NSMutableArray array];
     NSMutableArray<NSString *> *ranges = [NSMutableArray array];
     NSMutableArray<NSString *> *managers = [NSMutableArray array];
+    NSMutableDictionary<NSString *, NSArray<NSString *> *> *oldLibraries = [NSMutableDictionary dictionary];
     NSUInteger count = 0;
     for (NSString *name in [[files contentsOfDirectoryAtPath:directory error:NULL]
              sortedArrayUsingSelector:@selector(compare:)]) {
@@ -250,8 +268,15 @@ static int check(BurrowServicePaths *paths) {
         }
         count++;
         NSString *tweak = name.stringByDeletingPathExtension;
-        if ([BurrowArm64eABI([directory stringByAppendingPathComponent:name]) isEqualToString:@"old"]) {
+        NSString *tweakPath = [directory stringByAppendingPathComponent:name];
+        if ([BurrowArm64eABI(tweakPath) isEqualToString:@"old"]) {
             [old addObject:tweak];
+        }
+        for (NSString *library in BurrowJailbreakLibraries(tweakPath, paths.jailbreakRoots)) {
+            if ([BurrowArm64eABI(library) isEqualToString:@"old"]) {
+                NSString *key = library.lastPathComponent;
+                oldLibraries[key] = [oldLibraries[key] ?: @[] arrayByAddingObject:tweak];
+            }
         }
         NSDictionary *plist = [NSDictionary
             dictionaryWithContentsOfFile:[directory stringByAppendingPathComponent:[tweak stringByAppendingPathExtension:@"plist"]]];
@@ -269,11 +294,17 @@ static int check(BurrowServicePaths *paths) {
     BOOL shim = [files fileExistsAtPath:OldABIShim];
     print([NSString stringWithFormat:@"Tweaks:          %lu in %@", (unsigned long)count, directory]);
     print([NSString stringWithFormat:@"Old arm64e ABI:  %@", old.count ? [old componentsJoinedByString:@", "] : @"none"]);
+    NSMutableArray<NSString *> *libraryLines = [NSMutableArray array];
+    for (NSString *library in [oldLibraries.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
+        [libraryLines addObject:[NSString stringWithFormat:@"%@ (used by %@)", library,
+                                                           [oldLibraries[library] componentsJoinedByString:@", "]]];
+    }
+    print([NSString stringWithFormat:@"Old ABI libs:    %@", libraryLines.count ? [libraryLines componentsJoinedByString:@"; "] : @"none"]);
     print([NSString stringWithFormat:@"OldABI shim:     %@", shim ? @"installed" : @"not installed"]);
     print([NSString stringWithFormat:@"Version range:   %@ (never loaded, as with ElleKit)",
                                      ranges.count ? [ranges componentsJoinedByString:@", "] : @"none"]);
     print([NSString stringWithFormat:@"Tweak managers:  %@", managers.count ? [managers componentsJoinedByString:@", "] : @"none"]);
-    if (old.count && !shim) {
+    if ((old.count || oldLibraries.count) && !shim) {
         print(@"Tweaks with the old arm64e ABI crash arm64e processes without the shim.");
         return 1;
     }

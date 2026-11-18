@@ -126,6 +126,19 @@ burrowctl status       the tweak loader and hooking engine in use, burrowd,
                        the reports it has read, the crash log and Safe Mode
 burrowctl crashes [N]  the N newest crashes with tweaks loaded (10)
 burrowctl events       what Safe Mode turned off, and why
+burrowctl why NAME     the newest crash report of the process NAME (or a
+                       report file): the exception, the tweaks loaded, the
+                       one to blame, the images that are not Apple's, and
+                       the crashed thread
+burrowctl loaded NAME  the tweak loader, hooking engine and tweaks in the
+                       running process NAME
+burrowctl check        the tweaks and the libraries they load that use the
+                       old arm64e ABI, whether ElleKit's OldABI shim is
+                       installed, the tweaks with a CoreFoundationVersion
+                       range, and the tweak managers
+burrowctl loader burrow|ellekit
+                       which loader /var/jb/usr/lib/TweakLoader.dylib is
+                       (root only)
 ```
 
 The state lives in `/var/jb/var/lib/burrow`: `crashes/` for the crash log,
