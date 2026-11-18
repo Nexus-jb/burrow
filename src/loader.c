@@ -311,6 +311,21 @@ static bool turned_off(CFDictionaryRef settings, CFStringRef tweak, const struct
 
 // The process.
 
+// CoreFoundation's bundle functions call Foundation methods on their own
+// strings. In a process without Foundation they can throw (seen on macOS
+// 15), so the loader loads Foundation into such processes before using
+// them. Every app has Foundation already.
+static bool ensure_foundation(void) {
+    if (objc_lookUpClass("NSBundle") != Nil) {
+        return true;
+    }
+    if (dlopen("/System/Library/Frameworks/Foundation.framework/Foundation", RTLD_LAZY | RTLD_LOCAL)) {
+        return true;
+    }
+    os_log_error(OS_LOG_DEFAULT, "Burrow: Foundation cannot be loaded, so no tweaks are loaded");
+    return false;
+}
+
 static bool describe_process(struct process *process) {
     char path[PATH_MAX];
     uint32_t size = sizeof path;
@@ -412,9 +427,19 @@ static void load_tweak(const char *directory, const char *name, CFDictionaryRef 
     }
 }
 
+static void free_names(char **names, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        free(names[i]);
+    }
+    free(names);
+}
+
 static void load_tweaks(const char *directory, const char *settings_path) {
+    char **names;
+    size_t count = list_tweaks(directory, &names);
     struct process process;
-    if (!describe_process(&process)) {
+    if (count == 0 || !ensure_foundation() || !describe_process(&process)) {
+        free_names(names, count);
         return;
     }
     enum settings_state state;
@@ -423,21 +448,16 @@ static void load_tweaks(const char *directory, const char *settings_path) {
         // The settings may turn tweaks off for this process, such as a
         // banking app. Loading nothing keeps that promise.
         os_log_error(OS_LOG_DEFAULT, "Burrow: %{public}s cannot be read, so no tweaks are loaded", settings_path);
-        forget_process(&process);
-        return;
+    } else {
+        for (size_t i = 0; i < count; i++) {
+            load_tweak(directory, names[i], settings, &process);
+        }
     }
-
-    char **names;
-    size_t count = list_tweaks(directory, &names);
-    for (size_t i = 0; i < count; i++) {
-        load_tweak(directory, names[i], settings, &process);
-        free(names[i]);
-    }
-    free(names);
     if (settings) {
         CFRelease(settings);
     }
     forget_process(&process);
+    free_names(names, count);
 }
 
 __attribute__((constructor)) static void burrow_loader_start(void) {

@@ -6,8 +6,9 @@
 //
 // It prints the test tweaks whose constructors ran, in order, on one line.
 // Built twice: as loader-target, which has the Objective-C class
-// BurrowLoaderPlainClass, and as LoaderTarget inside LoaderTarget.app,
-// which has a bundle identifier instead.
+// BurrowLoaderPlainClass and does not use Foundation, and as LoaderTarget
+// inside LoaderTarget.app, which has a bundle identifier and uses
+// Foundation, like an app.
 
 #include <dlfcn.h>
 #include <objc/runtime.h>

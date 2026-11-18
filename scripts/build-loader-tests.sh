@@ -77,8 +77,9 @@ else
     executable_dir="$info"
 fi
 mkdir -p "$executable_dir"
+# Unlike loader-target, it uses Foundation, like every app.
 # shellcheck disable=SC2086
-"$@" $flags -DBURROW_LOADER_APP tests/loader/target.c -o "$executable_dir/LoaderTarget" -lobjc
+"$@" $flags -DBURROW_LOADER_APP tests/loader/target.c -o "$executable_dir/LoaderTarget" -lobjc -framework Foundation
 sign "$executable_dir/LoaderTarget" tests/ios.entitlements
 cat > "$info/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
