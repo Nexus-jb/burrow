@@ -70,7 +70,7 @@ static const struct settings_case CASES[] = {
     { "only the tweak manager left",
       "<dict><key>DisabledInProcesses</key><dict><key>LoaderTarget</key>"
       "<array><string>000First</string><string>AllFilters</string><string>AppBundle</string>"
-      "<string>NewCF</string></array></dict></dict>",
+      "<string>NewCF</string><string>Broken</string></array></dict></dict>",
       true, NULL, PLAIN_ALL, "" },
     // The Substrate safe mode variables load nothing.
     { "_MSSafeMode", NULL, false, "_MSSafeMode=1", "", "" },
