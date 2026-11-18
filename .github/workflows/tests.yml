@@ -75,9 +75,9 @@ jobs:
       - name: Build the sample tweak with Theos
         timeout-minutes: 10
         run: make build/ios/BurrowSampleTweak.dylib GNUMAKE="gmake messages=yes" < /dev/null
-      - name: Run the loader tests on macOS
+      - name: Run the loader and Safe Mode tests on macOS
         timeout-minutes: 10
-        run: make test-loader < /dev/null
+        run: make test-loader test-safemode < /dev/null
       - name: Build and package
         timeout-minutes: 10
         env:

@@ -4,6 +4,7 @@
 # make test            run every test (arm64 Linux or macOS)
 # make test-relocation run the relocation unit tests (any host)
 # make test-loader     run the loader tests (macOS)
+# make test-safemode   run the Safe Mode tests (macOS; they crash a test program)
 #
 # Cross-testing from another Linux machine:
 #   make test CC=aarch64-linux-gnu-gcc RUN="qemu-aarch64 -L /usr/aarch64-linux-gnu"
@@ -31,14 +32,16 @@ PORTABLE := src/arm64.c src/relocate.c src/memory_common.c
 OBJC := src/objc.c src/objc_stubs.S
 COMPAT := src/compat.c src/symbols.c
 LOADER_TEST_SOURCES := src/loader.c tests/loader/tweak.c tests/loader/target.c tests/loader_tests.c \
-	$(wildcard tests/loader/TweakInject/*.plist) scripts/build-loader-tests.sh tests/ios.entitlements
+	$(wildcard tests/loader/TweakInject/*.plist) scripts/build-loader-tests.sh tests/ios.entitlements \
+	$(wildcard safemode/*.h safemode/*.m) tests/safemode_tests.m tests/safemode/crash_tweak.c \
+	$(wildcard tests/safemode/CrashInject/*.plist tests/safemode/fixtures/*.ips)
 DARWIN_LIBRARY := $(PORTABLE) src/hook.c src/memory_darwin.c $(OBJC)
 
 ifeq ($(shell uname -s),Darwin)
 LIBRARY := $(DARWIN_LIBRARY) $(COMPAT)
 LDLIBS += -lobjc
 OBJC_TESTS := $(BUILD)/objc-tests
-LOADER_TESTS := test-loader
+LOADER_TESTS := test-loader test-safemode
 else
 LIBRARY := $(PORTABLE) src/hook.c src/memory_linux.c
 LDLIBS += -pthread
@@ -57,7 +60,7 @@ PACKAGE_VERSION ?= 0.0.0~dev
 HEADERS := $(wildcard include/burrow/*.h src/*.h)
 MODES := direct island adrp abs adrp-far abs-far
 
-.PHONY: all test test-relocation test-loader ios-tests ios-tests-package clean
+.PHONY: all test test-relocation test-loader test-safemode ios-tests ios-tests-package clean
 
 all: $(BUILD)/libburrow.a
 
@@ -91,6 +94,9 @@ $(BUILD)/loader/loader-tests: $(LOADER_TEST_SOURCES) $(HEADERS)
 
 test-loader: $(BUILD)/loader/loader-tests
 	$(RUN) $(BUILD)/loader/loader-tests $(BUILD)/loader
+
+test-safemode: $(BUILD)/loader/loader-tests
+	$(RUN) $(BUILD)/loader/safemode-tests $(BUILD)/loader
 
 test: test-relocation $(BUILD)/hook-tests $(OBJC_TESTS) $(LOADER_TESTS)
 	@for mode in $(MODES); do $(RUN) $(BUILD)/hook-tests $$mode || exit 1; done
