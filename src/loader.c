@@ -25,6 +25,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "pac.h"
+
 #ifndef BURROW_JBROOT
 #define BURROW_JBROOT "/var/jb"
 #endif
@@ -33,6 +35,7 @@ enum {
     MAX_PROPERTY_LIST_SIZE = 1024 * 1024,
     MAX_TWEAKS = 4096,
     MAX_NAME_LENGTH = 255,
+    MAX_BUNDLE_DEPTH = 4,
 };
 
 static const char TWEAK_SUFFIX[] = ".dylib";
@@ -40,6 +43,11 @@ static const char TWEAK_SUFFIX[] = ".dylib";
 struct process {
     CFStringRef executable;         // The last component of the executable's path.
     CFStringRef bundle_identifier;  // NULL when the process has none.
+    // Whether CoreFoundation's bundle functions are safe here (see
+    // core_foundation_came_first). When they are not, the identifiers of
+    // the loaded bundles are read once into loaded_bundles.
+    bool bundle_functions;
+    CFMutableSetRef loaded_bundles;
 };
 
 // Property list helpers.
@@ -119,7 +127,7 @@ static CFPropertyListRef read_property_list(const char *path, int *error) {
 
 // Filters. Each kind of filter matches when any one of its entries matches.
 
-static bool core_foundation_matches(CFArrayRef bounds, const struct process *process) {
+static bool core_foundation_matches(CFArrayRef bounds, struct process *process) {
     (void)process;
     // One or two numbers: the version must be at least the first and, when
     // there is a second, below it.
@@ -140,11 +148,11 @@ static bool core_foundation_matches(CFArrayRef bounds, const struct process *pro
     return true;
 }
 
-static bool executables_match(CFArrayRef executables, const struct process *process) {
+static bool executables_match(CFArrayRef executables, struct process *process) {
     return array_contains(executables, process->executable);
 }
 
-static bool classes_match(CFArrayRef classes, const struct process *process) {
+static bool classes_match(CFArrayRef classes, struct process *process) {
     (void)process;
     CFIndex count = CFArrayGetCount(classes);
     for (CFIndex i = 0; i < count; i++) {
@@ -158,14 +166,140 @@ static bool classes_match(CFArrayRef classes, const struct process *process) {
     return false;
 }
 
+// Bundles without CoreFoundation's bundle functions.
+
+static bool has_bundle_extension(const char *name) {
+    static const char *const extensions[] = { ".app", ".appex", ".framework", ".bundle", ".xpc" };
+    size_t length = strlen(name);
+    for (size_t i = 0; i < sizeof extensions / sizeof extensions[0]; i++) {
+        size_t extension = strlen(extensions[i]);
+        if (length > extension && strcmp(name + length - extension, extensions[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Finds the bundle that holds the file at path: the nearest enclosing
+// directory, at most MAX_BUNDLE_DEPTH levels up, with a bundle extension.
+// This covers X.app/X, X.framework/X and the macOS layouts
+// X.app/Contents/MacOS/X and X.framework/Versions/A/X.
+static bool enclosing_bundle(const char *path, char bundle[PATH_MAX]) {
+    size_t length = strlen(path);
+    if (length >= PATH_MAX) {
+        return false;
+    }
+    memcpy(bundle, path, length + 1);
+    for (int level = 0; level < MAX_BUNDLE_DEPTH; level++) {
+        char *slash = strrchr(bundle, '/');
+        if (!slash || slash == bundle) {
+            return false;
+        }
+        *slash = '\0';
+        const char *name = strrchr(bundle, '/');
+        if (has_bundle_extension(name ? name + 1 : bundle)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static CFStringRef read_bundle_identifier(const char *bundle) {
+    static const char *const places[] = { "Info.plist", "Contents/Info.plist", "Resources/Info.plist" };
+    for (size_t i = 0; i < sizeof places / sizeof places[0]; i++) {
+        char path[PATH_MAX];
+        int length = snprintf(path, sizeof path, "%s/%s", bundle, places[i]);
+        if (length < 0 || (size_t)length >= sizeof path) {
+            continue;
+        }
+        int error;
+        CFPropertyListRef info = read_property_list(path, &error);
+        if (!info) {
+            continue;
+        }
+        CFStringRef identifier = NULL;
+        if (is_dictionary(info)) {
+            CFTypeRef value = CFDictionaryGetValue((CFDictionaryRef)info, CFSTR("CFBundleIdentifier"));
+            if (is_string(value)) {
+                identifier = (CFStringRef)CFRetain(value);
+            }
+        }
+        CFRelease(info);
+        if (identifier) {
+            return identifier;
+        }
+    }
+    return NULL;
+}
+
+static CFStringRef identifier_of_file(const char *path) {
+    char bundle[PATH_MAX];
+    return enclosing_bundle(path, bundle) ? read_bundle_identifier(bundle) : NULL;
+}
+
+static CFMutableSetRef read_loaded_bundles(void) {
+    CFMutableSetRef identifiers = CFSetCreateMutable(kCFAllocatorDefault, 0, &kCFTypeSetCallBacks);
+    if (!identifiers) {
+        return NULL;
+    }
+    uint32_t count = _dyld_image_count();
+    for (uint32_t i = 0; i < count; i++) {
+        const char *name = _dyld_get_image_name(i);
+        CFStringRef identifier = name ? identifier_of_file(name) : NULL;
+        if (identifier) {
+            CFSetAddValue(identifiers, identifier);
+            CFRelease(identifier);
+        }
+    }
+    return identifiers;
+}
+
+static bool is_core_foundation(const char *path) {
+    return strstr(path, "/CoreFoundation.framework/") != NULL;
+}
+
+// CoreFoundation's bundle functions are safe when the process loaded
+// CoreFoundation itself. When CoreFoundation came in with the loader, as in
+// a command-line tool, they can throw (seen on macOS 15). dyld lists images
+// in load order, and CoreFoundation loaded with the loader comes after it.
+static bool core_foundation_came_first(void) {
+    Dl_info self;
+    if (!dladdr((const void *)burrow_code_address((const void *)core_foundation_came_first), &self)) {
+        return false;
+    }
+    uint32_t count = _dyld_image_count();
+    for (uint32_t i = 0; i < count; i++) {
+        if (_dyld_get_image_header(i) == self.dli_fbase) {
+            return false;
+        }
+        const char *name = _dyld_get_image_name(i);
+        if (name && is_core_foundation(name)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool bundle_loaded(CFStringRef identifier, struct process *process) {
+    if (process->bundle_identifier && CFEqual(identifier, process->bundle_identifier)) {
+        return true;
+    }
+    if (process->bundle_functions) {
+        return CFBundleGetBundleWithIdentifier(identifier) != NULL;
+    }
+    if (!process->loaded_bundles) {
+        process->loaded_bundles = read_loaded_bundles();
+    }
+    return process->loaded_bundles && CFSetContainsValue(process->loaded_bundles, identifier);
+}
+
 // A bundle matches when it is loaded in the process: the app itself or any
 // framework it uses, such as com.apple.UIKit.
-static bool bundles_match(CFArrayRef bundles, const struct process *process) {
-    (void)process;
+static bool bundles_match(CFArrayRef bundles, struct process *process) {
     CFIndex count = CFArrayGetCount(bundles);
     for (CFIndex i = 0; i < count; i++) {
         CFTypeRef item = CFArrayGetValueAtIndex(bundles, i);
-        if (is_string(item) && CFBundleGetBundleWithIdentifier((CFStringRef)item)) {
+        if (is_string(item) && bundle_loaded((CFStringRef)item, process)) {
             return true;
         }
     }
@@ -175,10 +309,10 @@ static bool bundles_match(CFArrayRef bundles, const struct process *process) {
 // By default every kind of filter present must match. With Mode set to
 // "Any", one matching kind is enough. A filter with none of these kinds
 // matches nothing.
-static bool filter_matches(CFDictionaryRef filter, const struct process *process) {
+static bool filter_matches(CFDictionaryRef filter, struct process *process) {
     const struct {
         CFStringRef key;
-        bool (*matches)(CFArrayRef, const struct process *);
+        bool (*matches)(CFArrayRef, struct process *);
     } kinds[] = {
         // The cheapest checks first.
         { CFSTR("CoreFoundationVersion"), core_foundation_matches },
@@ -206,7 +340,7 @@ static bool filter_matches(CFDictionaryRef filter, const struct process *process
     return present && !any;
 }
 
-static bool tweak_matches(const char *filter_path, const char *name, const struct process *process) {
+static bool tweak_matches(const char *filter_path, const char *name, struct process *process) {
     int error;
     CFPropertyListRef list = read_property_list(filter_path, &error);
     if (!list) {
@@ -291,7 +425,7 @@ static bool listed(CFTypeRef list, CFStringRef tweak) {
     return is_array(list) && (array_contains((CFArrayRef)list, tweak) || array_contains((CFArrayRef)list, CFSTR("*")));
 }
 
-static bool turned_off(CFDictionaryRef settings, CFStringRef tweak, const struct process *process) {
+static bool turned_off(CFDictionaryRef settings, CFStringRef tweak, struct process *process) {
     if (!settings) {
         return false;
     }
@@ -311,21 +445,6 @@ static bool turned_off(CFDictionaryRef settings, CFStringRef tweak, const struct
 
 // The process.
 
-// CoreFoundation's bundle functions call Foundation methods on their own
-// strings. In a process without Foundation they can throw (seen on macOS
-// 15), so the loader loads Foundation into such processes before using
-// them. Every app has Foundation already.
-static bool ensure_foundation(void) {
-    if (objc_lookUpClass("NSBundle") != Nil) {
-        return true;
-    }
-    if (dlopen("/System/Library/Frameworks/Foundation.framework/Foundation", RTLD_LAZY | RTLD_LOCAL)) {
-        return true;
-    }
-    os_log_error(OS_LOG_DEFAULT, "Burrow: Foundation cannot be loaded, so no tweaks are loaded");
-    return false;
-}
-
 static bool describe_process(struct process *process) {
     char path[PATH_MAX];
     uint32_t size = sizeof path;
@@ -337,9 +456,15 @@ static bool describe_process(struct process *process) {
     if (!process->executable) {
         return false;
     }
-    CFBundleRef bundle = CFBundleGetMainBundle();
-    CFStringRef identifier = bundle ? CFBundleGetIdentifier(bundle) : NULL;
-    process->bundle_identifier = identifier ? (CFStringRef)CFRetain(identifier) : NULL;
+    process->loaded_bundles = NULL;
+    process->bundle_functions = core_foundation_came_first();
+    if (process->bundle_functions) {
+        CFBundleRef bundle = CFBundleGetMainBundle();
+        CFStringRef identifier = bundle ? CFBundleGetIdentifier(bundle) : NULL;
+        process->bundle_identifier = identifier ? (CFStringRef)CFRetain(identifier) : NULL;
+    } else {
+        process->bundle_identifier = identifier_of_file(path);
+    }
     return true;
 }
 
@@ -347,6 +472,9 @@ static void forget_process(struct process *process) {
     CFRelease(process->executable);
     if (process->bundle_identifier) {
         CFRelease(process->bundle_identifier);
+    }
+    if (process->loaded_bundles) {
+        CFRelease(process->loaded_bundles);
     }
 }
 
@@ -397,7 +525,7 @@ static size_t list_tweaks(const char *directory, char ***names) {
 }
 
 static void load_tweak(const char *directory, const char *name, CFDictionaryRef settings,
-                       const struct process *process) {
+                       struct process *process) {
     CFStringRef tweak = CFStringCreateWithCString(kCFAllocatorDefault, name, kCFStringEncodingUTF8);
     if (!tweak) {
         return;
@@ -438,7 +566,7 @@ static void load_tweaks(const char *directory, const char *settings_path) {
     char **names;
     size_t count = list_tweaks(directory, &names);
     struct process process;
-    if (count == 0 || !ensure_foundation() || !describe_process(&process)) {
+    if (count == 0 || !describe_process(&process)) {
         free_names(names, count);
         return;
     }
