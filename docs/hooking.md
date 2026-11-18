@@ -149,6 +149,41 @@ start of compiled functions, are moved like any other instruction. Each
 moved instruction runs with the same stack pointer as before, so return
 addresses are signed and authenticated with the same modifier.
 
+## Substrate and libhooker compatibility
+
+Most tweaks are built with Theos and link against
+`@rpath/CydiaSubstrate.framework/CydiaSubstrate`. Burrow builds a framework
+with that install name, so existing tweaks run on Burrow's engine without
+being rebuilt. It exports these functions, implemented from the documented
+behaviour of the originals:
+
+| API | Functions |
+| --- | --------- |
+| Cydia Substrate | `MSHookFunction`, `MSHookMessageEx`, `MSFindSymbol`, `MSGetImageByName`, `MSCloseImage`, `MSHookMemory`, `MSDebug` |
+| libhooker | `LHHookFunctions`, `LHPatchMemory`, `LHOpenImage`, `LHCloseImage`, `LHFindSymbols`, `LHStrError` |
+| libblackjack | `LBHookMessage` |
+
+How they behave:
+
+- Substrate functions return no status, so failures are written to the
+  system log. When `MSHookFunction` cannot hook a function, the function is
+  left untouched and the tweak's original pointer is set to the function
+  itself, so calling it still works.
+- `LHHookFunctions` and `LHPatchMemory` return how many entries succeeded.
+  The `options` fields are not used yet.
+- `MSFindSymbol` and `LHFindSymbols` take names with the leading underscore,
+  as Substrate does. Exported symbols are looked up through dyld first; then
+  the image's own symbol table is searched, so symbols that are not exported
+  are found too. Function addresses come back signed on arm64e.
+- `MSGetImageByName` and `LHOpenImage` match the path dyld reports for an
+  image, then the resolved path, so `/var/jb/...` and the real path of the
+  same file both work.
+- `MSHookMemory` and `LHPatchMemory` write data over code with the same
+  page-protection path the hooking engine uses, up to 16 pages at a time.
+
+Under Dopamine, dyld's image 0 is not always the main executable. Code that
+needs the main executable's image must not assume index 0.
+
 ## Not supported yet
 - Removing hooks.
 - Suspending other threads while code is patched. Hooks are normally
@@ -173,8 +208,14 @@ addresses are signed and authenticated with the same modifier.
   defined and inherited methods, a superclass hooked after its subclass,
   chains, class methods, and methods with structure returns, floating-point
   arguments and stack arguments. It runs on macOS and iOS.
+- `tests/substrate_tests.c` loads a real Theos tweak, `tests/tweak`, against
+  Burrow's `CydiaSubstrate.framework` and checks its function hook, its
+  Objective-C hooks on defined, inherited and class methods, and its use of
+  `MSGetImageByName` and `MSFindSymbol`. It then calls every Substrate and
+  libhooker function above directly. The test program does not link Burrow,
+  so it sees only what a tweak would see. It runs on iOS.
 
-Both suites also run on jailbroken iPhones. CI builds them into a rootless
+These suites also run on jailbroken iPhones. CI builds them into a rootless
 package, `com.nexusjb.burrow-tests` (or run `make ios-tests-package` with
 Xcode, ldid and dpkg installed), once for arm64 and once for arm64e. Install
 it, then run `burrow-tests` in a terminal: it runs both sets.
@@ -186,3 +227,4 @@ Device results so far:
 | iPhone 14 Pro Max | A16 (arm64 tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.8 | All suites passed |
 | iPhone 14 Pro Max | A16 (arm64 tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.12 | All suites passed, including Objective-C |
 | iPhone 14 Pro Max | A16 (arm64 and arm64e tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.16 | All suites passed for both architectures |
+| iPhone 14 Pro Max | A16 (arm64 and arm64e tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.25 | All suites passed for both architectures, including the Theos tweak and the Substrate and libhooker functions |
