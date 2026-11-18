@@ -36,7 +36,7 @@ esac
 flags="-std=gnu11 -Wall -Wextra -Werror -Wshadow -Wstrict-prototypes -Wmissing-prototypes -O2 -g -Iinclude -Isrc"
 ldid=${LDID:-ldid}
 # NoPlist has no filter. BadPlist's filter cannot be read.
-tweaks="000First AllFilters AllFiltersMiss AnyMode AppBundle BadPlist ClassFilter EmptyFilter Executable FutureCF NewCF NoPlist OldCFRange OpenStep"
+tweaks="000First AllFilters AllFiltersMiss AnyMode AppBundle BadPlist ClassFilter EmptyFilter Executable FutureCF NewCF NoPlist OldCFRange OpenStep zManager"
 
 # sign <file> [entitlements]
 sign() {

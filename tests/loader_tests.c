@@ -32,8 +32,9 @@ extern char **environ;
 // What each target loads when no settings turn tweaks off. loader-target
 // has no bundle identifier and has the class BurrowLoaderPlainClass;
 // LoaderTarget has the bundle identifier com.nexusjb.burrow-tests.loader-target.
-#define PLAIN_ALL "000First AnyMode ClassFilter Executable NewCF OpenStep"
-#define APP_ALL "000First AllFilters AppBundle NewCF"
+// zManager is a tweak manager: it loads first, though its name sorts last.
+#define PLAIN_ALL "zManager 000First AnyMode ClassFilter Executable NewCF OpenStep"
+#define APP_ALL "zManager 000First AllFilters AppBundle NewCF"
 
 struct settings_case {
     const char *name;
@@ -41,36 +42,47 @@ struct settings_case {
     // set, the XML property list around them is added.
     const char *settings;
     bool wrap;
+    // An environment variable to set for this case, as NAME=value.
+    const char *environment;
     const char *plain;
     const char *app;
 };
 
 static const struct settings_case CASES[] = {
-    { "no settings", NULL, false, PLAIN_ALL, APP_ALL },
-    { "empty settings", "<dict/>", true, PLAIN_ALL, APP_ALL },
+    { "no settings", NULL, false, NULL, PLAIN_ALL, APP_ALL },
+    { "empty settings", "<dict/>", true, NULL, PLAIN_ALL, APP_ALL },
     { "off everywhere",
-      "<dict><key>DisabledTweaks</key><array><string>NewCF</string></array></dict>", true,
-      "000First AnyMode ClassFilter Executable OpenStep", "000First AllFilters AppBundle" },
+      "<dict><key>DisabledTweaks</key><array><string>NewCF</string></array></dict>", true, NULL,
+      "zManager 000First AnyMode ClassFilter Executable OpenStep", "zManager 000First AllFilters AppBundle" },
     { "off by executable name",
       "<dict><key>DisabledInProcesses</key><dict><key>loader-target</key>"
       "<array><string>Executable</string><string>OpenStep</string></array></dict></dict>",
-      true, "000First AnyMode ClassFilter NewCF", APP_ALL },
+      true, NULL, "zManager 000First AnyMode ClassFilter NewCF", APP_ALL },
     { "all off by bundle identifier",
       "<dict><key>DisabledInProcesses</key><dict><key>com.nexusjb.burrow-tests.loader-target</key>"
       "<array><string>*</string></array></dict></dict>",
-      true, PLAIN_ALL, "" },
+      true, NULL, PLAIN_ALL, "" },
     { "off by app executable name",
       "<dict><key>DisabledInProcesses</key><dict><key>LoaderTarget</key>"
       "<array><string>AppBundle</string></array></dict></dict>",
-      true, PLAIN_ALL, "000First AllFilters NewCF" },
+      true, NULL, PLAIN_ALL, "zManager 000First AllFilters NewCF" },
+    // A tweak manager alone is not loaded.
+    { "only the tweak manager left",
+      "<dict><key>DisabledInProcesses</key><dict><key>LoaderTarget</key>"
+      "<array><string>000First</string><string>AllFilters</string><string>AppBundle</string>"
+      "<string>NewCF</string></array></dict></dict>",
+      true, NULL, PLAIN_ALL, "" },
+    // The Substrate safe mode variables load nothing.
+    { "_MSSafeMode", NULL, false, "_MSSafeMode=1", "", "" },
+    { "_SafeMode", NULL, false, "_SafeMode=1", "", "" },
     // Settings that cannot be read load nothing, so a tweak the user turned
     // off never loads by mistake.
-    { "unreadable settings", "{ DisabledTweaks = (", false, "", "" },
-    { "settings that are not a dictionary", "<array/>", true, "", "" },
-    { "settings with a wrong type", "<dict><key>DisabledTweaks</key><string>NewCF</string></dict>", true, "", "" },
+    { "unreadable settings", "{ DisabledTweaks = (", false, NULL, "", "" },
+    { "settings that are not a dictionary", "<array/>", true, NULL, "", "" },
+    { "settings with a wrong type", "<dict><key>DisabledTweaks</key><string>NewCF</string></dict>", true, NULL, "", "" },
     { "process settings with a wrong type",
       "<dict><key>DisabledInProcesses</key><dict><key>loader-target</key><string>*</string></dict></dict>",
-      true, "", "" },
+      true, NULL, "", "" },
 };
 
 static unsigned checks;
@@ -190,8 +202,20 @@ int main(int argc, char **argv) {
             failures++;
             continue;
         }
+        char variable[64] = "";
+        if (test->environment) {
+            snprintf(variable, sizeof variable, "%s", test->environment);
+            char *equals = strchr(variable, '=');
+            if (equals) {
+                *equals = '\0';
+                setenv(variable, equals + 1, 1);
+            }
+        }
         expect(test->name, "loader-target", plain, loader, test->plain);
         expect(test->name, "LoaderTarget.app", app, loader, test->app);
+        if (variable[0]) {
+            unsetenv(variable);
+        }
     }
     unlink(settings);
     rmdir(scratch);

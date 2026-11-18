@@ -12,6 +12,9 @@
 # Testing on a jailbroken device (needs Xcode, ldid and dpkg):
 #   make ios-tests-package PACKAGE_VERSION=0.0.0~dev.1
 # then install the package from build/packages and run "burrow-tests".
+#
+# The Burrow package for a rootless jailbreak:
+#   make burrow-package PACKAGE_VERSION=0.0.0~dev.1
 
 CC ?= cc
 AR ?= ar
@@ -37,6 +40,9 @@ LOADER_TEST_SOURCES := src/loader.c tests/loader/tweak.c tests/loader/target.c t
 	$(wildcard tests/safemode/CrashInject/*.plist tests/safemode/fixtures/*.ips) \
 	tests/safemode/dpkg/status
 DARWIN_LIBRARY := $(PORTABLE) src/hook.c src/memory_darwin.c $(OBJC)
+SERVICE := safemode/crash_report.m safemode/crash_analysis.m safemode/safe_mode.m safemode/crash_log.m \
+	safemode/packages.m safemode/service.m daemon/state.m
+SERVICE_HEADERS := $(wildcard safemode/*.h daemon/*.h)
 
 ifeq ($(shell uname -s),Darwin)
 LIBRARY := $(DARWIN_LIBRARY) $(COMPAT)
@@ -61,7 +67,7 @@ PACKAGE_VERSION ?= 0.0.0~dev
 HEADERS := $(wildcard include/burrow/*.h src/*.h)
 MODES := direct island adrp abs adrp-far abs-far
 
-.PHONY: all test test-relocation test-loader test-safemode ios-tests ios-tests-package clean
+.PHONY: all test test-relocation test-loader test-safemode ios-tests ios-tests-package burrow-package clean
 
 all: $(BUILD)/libburrow.a
 
@@ -141,6 +147,35 @@ $(IOS_BUILD)/%/BurrowLoader.dylib: src/loader.c $(HEADERS)
 
 $(IOS_BUILD)/%/loader/loader-tests: $(LOADER_TEST_SOURCES) $(HEADERS)
 	LDID="$(LDID)" scripts/build-loader-tests.sh $(IOS_BUILD)/$*/loader ios $(IOS_CC) -arch $* -mios-version-min=15.0
+
+# burrowd and burrowctl: Objective-C, never loaded into other processes.
+$(IOS_BUILD)/%/burrowd: daemon/burrowd.m $(SERVICE) $(SERVICE_HEADERS)
+	mkdir -p $(@D)
+	$(IOS_CC) -arch $* -mios-version-min=15.0 $(COMMON) -fobjc-arc -Isafemode -Idaemon $(CFLAGS) \
+		daemon/burrowd.m $(SERVICE) -o $@ -framework Foundation
+	$(LDID) -S $@
+
+$(IOS_BUILD)/%/burrowctl: daemon/burrowctl.m $(SERVICE) $(SERVICE_HEADERS)
+	mkdir -p $(@D)
+	$(IOS_CC) -arch $* -mios-version-min=15.0 $(COMMON) -fobjc-arc -Isafemode -Idaemon $(CFLAGS) \
+		daemon/burrowctl.m $(SERVICE) -o $@ -framework Foundation
+	$(LDID) -S $@
+
+# Universal binaries for the package: every process, arm64 or arm64e, can
+# load the libraries.
+IOS_UNIVERSAL := $(BUILD)/ios-universal
+UNIVERSAL := BurrowLoader.dylib burrowd burrowctl
+
+$(IOS_UNIVERSAL)/%: $(IOS_BUILD)/arm64/% $(IOS_BUILD)/arm64e/%
+	mkdir -p $(@D)
+	lipo -create $^ -output $@
+
+$(IOS_UNIVERSAL)/CydiaSubstrate: $(foreach arch,$(IOS_ARCHS),$(IOS_BUILD)/$(arch)/frameworks/CydiaSubstrate.framework/CydiaSubstrate)
+	mkdir -p $(@D)
+	lipo -create $^ -output $@
+
+burrow-package: $(addprefix $(IOS_UNIVERSAL)/,$(UNIVERSAL) CydiaSubstrate)
+	scripts/package-burrow.sh $(IOS_UNIVERSAL) $(PACKAGE_VERSION) $(BUILD)/packages
 
 # The sample tweak, built with Theos (needs THEOS and GNU Make 4).
 $(IOS_BUILD)/BurrowSampleTweak.dylib: tests/tweak/Tweak.x tests/tweak/Makefile
