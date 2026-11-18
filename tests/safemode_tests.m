@@ -287,6 +287,18 @@ static void crash_and_check(BurrowSafeMode *safe_mode, NSString *target, NSStrin
     } else {
         fprintf(stderr, "[safemode] %s: action %ld, culprit %s\n", path.lastPathComponent.UTF8String, (long)action,
                 [safe_mode culpritOfReport:report frame:NULL].UTF8String ?: "none");
+        for (NSString *image in report.imagePaths) {
+            if ([image containsString:@"Tweak"] || [image containsString:@"Innocent"] || [image containsString:@"crash-target"]) {
+                fprintf(stderr, "[safemode]   image %s\n", image.UTF8String);
+            }
+        }
+        NSUInteger shown = 0;
+        for (BurrowCrashFrame *frame in report.crashedThreadFrames) {
+            if (shown++ == 4) {
+                break;
+            }
+            fprintf(stderr, "[safemode]   frame %s %s\n", frame.imagePath.UTF8String ?: "(none)", frame.symbol.UTF8String ?: "");
+        }
     }
     // The report was made by this test; leave no trace of it.
     [[NSFileManager defaultManager] removeItemAtPath:path error:NULL];
