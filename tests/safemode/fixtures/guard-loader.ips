@@ -14,17 +14,17 @@
       "frames": [
         {
           "imageOffset": 64,
-          "imageIndex": 11,
+          "imageIndex": 1,
           "symbol": "load_tweaks",
           "symbolLocation": 4
         },
         {
           "imageOffset": 128,
-          "imageIndex": 12
+          "imageIndex": 2
         },
         {
           "imageOffset": 16,
-          "imageIndex": 10
+          "imageIndex": 0
         }
       ]
     }
