@@ -71,6 +71,8 @@ static NSUUID *uuid_value(NSDictionary *dictionary, NSString *key) {
 @property (nonatomic, readwrite, copy, nullable) NSString *processPath;
 @property (nonatomic, readwrite, copy, nullable) NSUUID *mainImageUUID;
 @property (nonatomic, readwrite, copy, nullable) NSString *incident;
+@property (nonatomic, readwrite, copy, nullable) NSString *osVersion;
+@property (nonatomic, readwrite, copy, nullable) NSString *deviceModel;
 @property (nonatomic, readwrite, copy, nullable) NSDate *date;
 @property (nonatomic, readwrite, copy, nullable) NSString *exceptionType;
 @property (nonatomic, readwrite, copy, nullable) NSString *signalName;
@@ -117,6 +119,7 @@ static NSUUID *uuid_value(NSDictionary *dictionary, NSString *key) {
     report.bundleIdentifier = string_value(header, @"bundleID");
     report.incident = string_value(header, @"incident_id") ?: string_value(header, @"incident");
     report.mainImageUUID = uuid_value(header, @"slice_uuid");
+    report.osVersion = string_value(header, @"os_version");
     report.date = parse_date(string_value(header, @"timestamp") ?: @"");
     report.crashedThreadFrames = @[];
     report.lastExceptionFrames = @[];
@@ -138,6 +141,7 @@ static NSUUID *uuid_value(NSDictionary *dictionary, NSString *key) {
         report.processName = process;
     }
     report.processPath = string_value(body, @"procPath");
+    report.deviceModel = string_value(body, @"modelCode");
     NSString *identifier = string_value(typed(body[@"bundleInfo"], [NSDictionary class]), @"CFBundleIdentifier");
     if (identifier.length) {
         report.bundleIdentifier = identifier;

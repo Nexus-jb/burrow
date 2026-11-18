@@ -6,6 +6,7 @@
 
 #import <Foundation/Foundation.h>
 
+#import "crash_analysis.h"
 #import "crash_report.h"
 
 NS_ASSUME_NONNULL_BEGIN
@@ -42,6 +43,11 @@ extern NSString *const BurrowSafeModeEventReport;   // the crash report's file n
                           jailbreakRoots:(NSArray<NSString *> *)jailbreakRoots
                             settingsPath:(NSString *)settingsPath
                                statePath:(NSString *)statePath;
+
+// The same, sharing an analyzer with the crash log.
+- (instancetype)initWithAnalyzer:(BurrowCrashAnalyzer *)analyzer
+                    settingsPath:(NSString *)settingsPath
+                       statePath:(NSString *)statePath;
 
 // The tweak to blame for a crash, or nil.
 - (nullable NSString *)culpritOfReport:(BurrowCrashReport *)report frame:(BurrowCrashFrame *_Nullable *_Nullable)frame;

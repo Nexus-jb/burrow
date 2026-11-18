@@ -11,7 +11,9 @@
 
 #import <Foundation/Foundation.h>
 
+#import "crash_log.h"
 #import "crash_report.h"
+#import "packages.h"
 #import "safe_mode.h"
 
 #include <errno.h>
@@ -182,6 +184,68 @@ static void test_fixtures(NSString *fixtures, NSString *scratch) {
     CHECK([[NSData dataWithContentsOfFile:broken] isEqual:before]);
 }
 
+static NSDictionary *record(BurrowCrashLog *log, NSString *dir, NSString *name) {
+    NSString *path = [dir stringByAppendingPathComponent:name];
+    NSData *data = [NSData dataWithContentsOfFile:path];
+    BurrowCrashReport *report = data ? [BurrowCrashReport reportWithData:data error:NULL] : nil;
+    NSDictionary *entry = nil;
+    NSError *error = nil;
+    if (!report || ![log recordReport:report data:data name:name entry:&entry error:&error]) {
+        fprintf(stderr, "[safemode] %s was not recorded: %s\n", name.UTF8String,
+                error.localizedDescription.UTF8String ?: "no report");
+    }
+    return entry;
+}
+
+static void test_crash_log(NSString *fixtures, NSString *dpkg, NSString *scratch) {
+    BurrowCrashAnalyzer *analyzer = [[BurrowCrashAnalyzer alloc]
+        initWithTweakDirectories:@[ @"/var/jb/usr/lib/TweakInject", [RealRoot stringByAppendingString:@"/usr/lib/TweakInject"] ]
+                  jailbreakRoots:@[ @"/var/jb", RealRoot ]];
+    BurrowPackageIndex *packages = [[BurrowPackageIndex alloc] initWithDpkgDirectory:dpkg];
+    CHECK([[packages packageForLibrary:@"/var/jb/usr/lib/TweakInject/Foo.dylib"]
+        isEqual:(@{ BurrowPackageIdentifier : @"com.example.foo", BurrowPackageName : @"Foo", BurrowPackageVersion : @"1.2" })]);
+    CHECK([[packages packageForLibrary:@"/var/jb/usr/lib/TweakInject/Bar.dylib"][BurrowPackageVersion] isEqualToString:@"2.0-1"]);
+    CHECK([packages packageForLibrary:@"/var/jb/usr/lib/TweakInject/Old.dylib"] == nil);
+    CHECK([packages packageForLibrary:@"/var/jb/usr/lib/TweakInject/Foo.plist"] == nil);
+
+    NSString *directory = [scratch stringByAppendingPathComponent:@"crash-log"];
+    BurrowCrashLog *log = [[BurrowCrashLog alloc] initWithDirectory:directory analyzer:analyzer packages:packages];
+
+    // A crash with a tweak to blame names it and its package.
+    NSDictionary *entry = record(log, fixtures, @"segv.ips");
+    CHECK([entry[BurrowCrashLogTweak] isEqualToString:@"Foo"]);
+    CHECK([entry[BurrowCrashLogTweaks] isEqual:(@[ @"Bar", @"Foo" ])]);
+    CHECK([entry[BurrowCrashLogPackages][@"Foo"][BurrowPackageIdentifier] isEqualToString:@"com.example.foo"]);
+    CHECK([entry[BurrowCrashLogPackages][@"Bar"][BurrowPackageIdentifier] isEqualToString:@"com.example.bar"]);
+    CHECK([entry[BurrowCrashLogDevice] isEqualToString:@"iPhone15,3"]);
+    CHECK([entry[BurrowCrashLogOSVersion] isEqualToString:@"iPhone OS 16.3.1 (20D67)"]);
+    CHECK([[BurrowCrashLog describeEntry:entry]
+        isEqualToString:@"com.apple.springboard: Foo (com.example.foo 1.2): EXC_BAD_ACCESS (SIGSEGV) in Foo.dylib "
+                        @"(-[FooView layoutSubviews] + 16)"]);
+    NSData *original = [NSData dataWithContentsOfFile:[fixtures stringByAppendingPathComponent:@"segv.ips"]];
+    CHECK([[NSData dataWithContentsOfFile:[log pathOfReportInEntry:entry]] isEqual:original]);
+
+    // A crash with tweaks loaded but none to blame is recorded too.
+    entry = record(log, fixtures, @"app-fault.ips");
+    CHECK(entry != nil && entry[BurrowCrashLogTweak] == nil);
+    CHECK([entry[BurrowCrashLogReason] hasPrefix:@"EXC_BAD_ACCESS (SIGSEGV) in Example (-[ExampleModel load]"]);
+    CHECK([[BurrowCrashLog describeEntry:entry] hasPrefix:@"com.example.app: no single tweak to blame (loaded: Bar, Foo): "]);
+
+    // Skipped: the same crash again, a crash without tweaks, a hang.
+    CHECK(record(log, fixtures, @"segv.ips") == nil);
+    CHECK(record(log, fixtures, @"no-tweaks.ips") == nil);
+    CHECK(record(log, fixtures, @"hang.ips") == nil);
+    CHECK(log.entries.count == 2);
+
+    // The oldest entries go first, with their copies.
+    NSString *first_copy = [log pathOfReportInEntry:log.entries.firstObject];
+    log.maximumEntries = 2;
+    CHECK(record(log, fixtures, @"exception.ips") != nil);
+    CHECK(log.entries.count == 2);
+    CHECK([log.entries.firstObject[BurrowCrashLogProcess] isEqualToString:@"Example"]);
+    CHECK(![[NSFileManager defaultManager] fileExistsAtPath:first_copy]);
+}
+
 #pragma mark Real crashes
 
 // Runs crash-target and returns what it printed. *crashed is set when a
@@ -275,8 +339,8 @@ static NSString *real_path(NSString *path) {
 
 // Crashes crash-target and checks that Safe Mode turns off the tweak that
 // crashed it, and nothing else.
-static void crash_and_check(BurrowSafeMode *safe_mode, NSString *target, NSString *loader, NSMutableSet *seen,
-                            NSString *tweak) {
+static void crash_and_check(BurrowSafeMode *safe_mode, BurrowCrashLog *log, NSString *package, NSString *target,
+                            NSString *loader, NSMutableSet *seen, NSString *tweak) {
     NSDate *start = [NSDate date];
     BOOL crashed = NO;
     run_target(target, loader, &crashed);
@@ -319,6 +383,17 @@ static void crash_and_check(BurrowSafeMode *safe_mode, NSString *target, NSStrin
             fprintf(stderr, "[safemode]   frame %s %s\n", frame.image.name.UTF8String ?: "(none)", frame.symbol.UTF8String ?: "");
         }
     }
+    // The crash log names the tweak and the package that installed it.
+    NSDictionary *entry = nil;
+    NSData *data = [NSData dataWithContentsOfFile:path];
+    CHECK(data && [log recordReport:report data:data name:path.lastPathComponent entry:&entry error:&error]);
+    CHECK([entry[BurrowCrashLogTweak] isEqualToString:tweak]);
+    CHECK([entry[BurrowCrashLogPackages][tweak][BurrowPackageIdentifier] isEqualToString:package]);
+    CHECK([[NSData dataWithContentsOfFile:[log pathOfReportInEntry:entry]] isEqual:data]);
+    if (entry) {
+        printf("[crashlog] %s\n", [BurrowCrashLog describeEntry:entry].UTF8String);
+    }
+
     // The report was made by this test; leave no trace of it.
     [[NSFileManager defaultManager] removeItemAtPath:path error:NULL];
 }
@@ -340,14 +415,44 @@ static void test_real_crashes(NSString *dir, NSString *scratch) {
     if (real_path(@"/var/jb")) {
         [roots addObjectsFromArray:@[ @"/var/jb", real_path(@"/var/jb") ]];
     }
-    BurrowSafeMode *safe_mode = [[BurrowSafeMode alloc] initWithTweakDirectories:directories
-                                                                  jailbreakRoots:roots
-                                                                    settingsPath:settings
-                                                                       statePath:state];
+    BurrowCrashAnalyzer *analyzer = [[BurrowCrashAnalyzer alloc] initWithTweakDirectories:directories
+                                                                           jailbreakRoots:roots];
+    BurrowSafeMode *safe_mode = [[BurrowSafeMode alloc] initWithAnalyzer:analyzer settingsPath:settings statePath:state];
+
+    // On a jailbroken device the test tweaks were installed by this test
+    // package. Elsewhere, a dpkg database is made up for them.
+    NSString *package = @"com.nexusjb.burrow-tests";
+    NSString *dpkg = @"/var/jb/var/lib/dpkg";
+    if (![[NSFileManager defaultManager] fileExistsAtPath:[dpkg stringByAppendingPathComponent:@"status"]]) {
+        package = @"com.nexusjb.crash-tests";
+        dpkg = [scratch stringByAppendingPathComponent:@"dpkg"];
+        [[NSFileManager defaultManager] createDirectoryAtPath:[dpkg stringByAppendingPathComponent:@"info"]
+                                  withIntermediateDirectories:YES
+                                                   attributes:nil
+                                                        error:NULL];
+        NSMutableString *list = [NSMutableString string];
+        for (NSString *name in @[ @"Innocent", @"SegvTweak", @"ThrowTweak" ]) {
+            [list appendFormat:@"%@/%@.dylib\n", tweaks, name];
+        }
+        [list writeToFile:[dpkg stringByAppendingPathComponent:@"info/com.nexusjb.crash-tests.list"]
+               atomically:YES
+                 encoding:NSUTF8StringEncoding
+                    error:NULL];
+        [@"Package: com.nexusjb.crash-tests\nStatus: install ok installed\nVersion: 1.0\n"
+            writeToFile:[dpkg stringByAppendingPathComponent:@"status"]
+             atomically:YES
+               encoding:NSUTF8StringEncoding
+                  error:NULL];
+    }
+    BurrowCrashLog *log = [[BurrowCrashLog alloc]
+        initWithDirectory:[scratch stringByAppendingPathComponent:@"crash-target-log"]
+                 analyzer:analyzer
+                 packages:[[BurrowPackageIndex alloc] initWithDpkgDirectory:dpkg]];
+
     NSMutableSet *seen = [NSMutableSet set];
     // Tweaks load by name: Innocent, then SegvTweak, then ThrowTweak.
-    crash_and_check(safe_mode, target, loader, seen, @"SegvTweak");
-    crash_and_check(safe_mode, target, loader, seen, @"ThrowTweak");
+    crash_and_check(safe_mode, log, package, target, loader, seen, @"SegvTweak");
+    crash_and_check(safe_mode, log, package, target, loader, seen, @"ThrowTweak");
 
     BOOL crashed = YES;
     NSString *output = run_target(target, loader, &crashed);
@@ -371,6 +476,8 @@ int main(int argc, char **argv) {
         }
         NSString *scratch = @(scratch_template);
         test_fixtures([dir stringByAppendingPathComponent:@"safemode-fixtures"], scratch);
+        test_crash_log([dir stringByAppendingPathComponent:@"safemode-fixtures"],
+                       [dir stringByAppendingPathComponent:@"safemode-dpkg"], scratch);
         test_real_crashes(dir, scratch);
         [[NSFileManager defaultManager] removeItemAtPath:scratch error:NULL];
 

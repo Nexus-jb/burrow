@@ -1,0 +1,6 @@
+/.
+/var
+/var/jb
+/var/jb/usr/lib/TweakInject
+/var/jb/usr/lib/TweakInject/Foo.dylib
+/var/jb/usr/lib/TweakInject/Foo.plist

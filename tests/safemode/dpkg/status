@@ -1,0 +1,23 @@
+Package: com.example.foo
+Status: install ok installed
+Priority: optional
+Section: Tweaks
+Installed-Size: 120
+Maintainer: Example <example@example.com>
+Architecture: iphoneos-arm64
+Version: 1.2
+Depends: mobilesubstrate
+Description: A test tweak
+ that spans two lines.
+Name: Foo
+
+Package: com.example.bar
+Status: install ok installed
+Architecture: iphoneos-arm64
+Version: 2.0-1
+Description: Another test tweak
+
+Package: com.example.removed
+Status: deinstall ok config-files
+Architecture: iphoneos-arm64
+Version: 0.9

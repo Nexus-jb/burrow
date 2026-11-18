@@ -1,9 +1,21 @@
-# How Safe Mode works
+# How Safe Mode and the crash log work
 
 When a tweak crashes a process, Safe Mode finds that tweak and turns it off
-in that process only, and records why. The code is in `safemode/`. It runs
-outside the crashing process, so nothing is added to the processes tweaks
-are loaded into, and the crash reporters of apps keep working.
+in that process only, and records why. The crash log keeps every crash of a
+process with tweaks loaded, with the tweak to blame and the package it came
+from. The code is in `safemode/`:
+
+| File | Contents |
+| ---- | -------- |
+| `crash_report.m` | Reads crash reports |
+| `crash_analysis.m` | Finds the tweaks in a report and the one to blame, for both of the others |
+| `safe_mode.m` | Turns the tweak to blame off |
+| `crash_log.m` | Keeps the crash log |
+| `packages.m` | Finds the package that installed a tweak in the dpkg database |
+
+All of it runs outside the crashing process, so nothing is added to the
+processes tweaks are loaded into, and the crash reporters of apps keep
+working.
 
 ## Where the information comes from
 
@@ -70,6 +82,31 @@ Safe Mode changes the loader settings under an exclusive lock on
 lock. If the settings exist but are not valid, Safe Mode leaves them alone:
 the loader already loads nothing until they are fixed.
 
+## The crash log
+
+Safe Mode only acts when it must. The crash log records every crash of a
+process with tweaks loaded, also when no tweak was to blame, so the person
+and later the tweak's developer can see what happened. Each entry holds:
+
+- the date, the process and its bundle identifier;
+- the tweak to blame, if any, and every tweak that was loaded;
+- for each of those tweaks, the package that installed it and its version,
+  from the dpkg database (`/var/jb/var/lib/dpkg` on a rootless jailbreak);
+- the same one-line reason Safe Mode uses;
+- the system version and the device model;
+- a copy of the crash report, because the system deletes old ones.
+
+For example:
+
+```
+com.apple.springboard: Foo (com.example.foo 1.2): EXC_BAD_ACCESS (SIGSEGV) in Foo.dylib (-[FooView layoutSubviews] + 16)
+com.example.app: no single tweak to blame (loaded: Bar, Foo): EXC_BAD_ACCESS (SIGSEGV) in Example (-[ExampleModel load] + 0)
+```
+
+The log keeps the 50 newest entries and deletes the copies of older ones.
+Each crash is recorded once. Nothing leaves the device: sending a report to
+a tweak's developer needs the person's consent and is a separate feature.
+
 ## Running it
 
 The library is built and tested here. The daemon that hands it every new
@@ -86,15 +123,21 @@ work plan.
   exception formats, a crash in the app's own code, a tweak frame too deep
   to blame, a crash loop, a process without tweaks, a hang report, a broken
   report, the same report twice, and settings that are not valid.
+- The crash log with the same reports and a small dpkg database in
+  `tests/safemode/dpkg`: the tweak and package names, the kept copy, the
+  skipped reports, and the oldest entries going first.
 - Real crashes: `crash-target` loads three test tweaks through the test
   build of the loader. `SegvTweak` writes through a null pointer and
   `ThrowTweak` throws an uncaught exception; `Innocent` does nothing. The
-  test waits for the system's crash report, hands it to Safe Mode, and
-  checks that the crashing tweak was turned off and `Innocent` was not. It
-  deletes the reports it made.
+  test waits for the system's crash report and hands it to Safe Mode and
+  the crash log. It checks that the crashing tweak was turned off and
+  `Innocent` was not, and that the log names the crashing tweak and its
+  package. On a jailbroken device that is the test package itself, read
+  from the real dpkg database. The test deletes the reports it made.
 
 Device results:
 
 | Device | Chip | iOS | Jailbreak | Build | Result |
 | ------ | ---- | --- | --------- | ----- | ------ |
 | iPhone 14 Pro Max | A16 (arm64 and arm64e tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.39 | All 63 checks passed for both architectures, with real crash reports from iOS |
+| iPhone 14 Pro Max | A16 (arm64 and arm64e tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.42 | All 94 checks passed for both architectures; the crash log named each crashing tweak and its package from the device's dpkg database |

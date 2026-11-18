@@ -167,5 +167,6 @@
   "bundleInfo": {
     "CFBundleIdentifier": "com.apple.springboard",
     "CFBundleShortVersionString": "1.0"
-  }
+  },
+  "modelCode": "iPhone15,3"
 }
