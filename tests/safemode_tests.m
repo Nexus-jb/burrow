@@ -183,6 +183,31 @@ static void test_fixtures(NSString *fixtures, NSString *scratch) {
                            error:&error]);
     CHECK(error != nil);
     CHECK([[NSData dataWithContentsOfFile:broken] isEqual:before]);
+
+    // Crashes on the loader's thread while it was loading tweaks, in the
+    // Objective-C runtime. As in the device report they come from, the
+    // report names no tweak: it lists only the images its backtraces use,
+    // and the tweak being mapped has run no code yet. Each counts as a crash
+    // with tweaks loaded; three within two minutes turn every tweak off in
+    // that process.
+    BurrowCrashAnalyzer *analyzer = [[BurrowCrashAnalyzer alloc]
+        initWithTweakDirectories:@[ @"/var/jb/usr/lib/TweakInject" ]
+                  jailbreakRoots:@[ @"/var/jb", RealRoot ]];
+    BurrowCrashAnalysis *loading = [analyzer analyzeReport:fixture(fixtures, @"loading1.ips")];
+    CHECK(loading.crashedWhileLoading);
+    CHECK(loading.tweaks.count == 0);
+    CHECK(loading.culprit == nil);
+    CHECK([loading.reason isEqualToString:@"EXC_BAD_ACCESS (SIGBUS) while the loader was loading tweaks, in "
+                                          @"libobjc.A.dylib (readClass(objc_class*, bool, bool) + 92)"]);
+    CHECK(handle(safe_mode, fixtures, @"loading1.ips", &event) == BurrowSafeModeNoCulprit);
+    CHECK(handle(safe_mode, fixtures, @"loading2.ips", &event) == BurrowSafeModeNoCulprit);
+    CHECK(handle(safe_mode, fixtures, @"loading3.ips", &event) == BurrowSafeModeTurnedOffAll);
+    CHECK([event[BurrowSafeModeEventProcess] isEqualToString:@"com.apple.springboard"]);
+    CHECK([read_plist(settings)[@"DisabledInProcesses"][@"com.apple.springboard"] containsObject:@"*"]);
+
+    // The loader was loading on another thread than the one that crashed.
+    CHECK(![analyzer analyzeReport:fixture(fixtures, @"loading-elsewhere.ips")].crashedWhileLoading);
+    CHECK(handle(safe_mode, fixtures, @"loading-elsewhere.ips", &event) == BurrowSafeModeIgnored);
 }
 
 static NSDictionary *record(BurrowCrashLog *log, NSString *dir, NSString *name) {
@@ -245,6 +270,19 @@ static void test_crash_log(NSString *fixtures, NSString *dpkg, NSString *scratch
     CHECK(log.entries.count == 2);
     CHECK([log.entries.firstObject[BurrowCrashLogProcess] isEqualToString:@"Example"]);
     CHECK(![[NSFileManager defaultManager] fileExistsAtPath:first_copy]);
+
+    // A crash on the loader's thread is logged, though the report names no
+    // tweak.
+    BurrowCrashLog *loads = [[BurrowCrashLog alloc] initWithDirectory:[scratch stringByAppendingPathComponent:@"crash-log-loading"]
+                                                             analyzer:analyzer
+                                                             packages:packages];
+    entry = record(loads, fixtures, @"loading1.ips");
+    CHECK(entry != nil && entry[BurrowCrashLogTweak] == nil);
+    CHECK([entry[BurrowCrashLogTweaks] isEqual:@[]]);
+    CHECK([[BurrowCrashLog describeEntry:entry]
+        isEqualToString:@"com.apple.springboard: no single tweak to blame: EXC_BAD_ACCESS (SIGBUS) while the loader "
+                        @"was loading tweaks, in libobjc.A.dylib (readClass(objc_class*, bool, bool) + 92)"]);
+    CHECK(record(loads, fixtures, @"loading-elsewhere.ips") == nil);
 }
 
 // The burrowd service: every report once, Safe Mode only from a date on.

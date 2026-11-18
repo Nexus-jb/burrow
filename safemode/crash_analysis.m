@@ -154,6 +154,7 @@ static NSString *what_happened(BurrowCrashReport *report) {
 @property (nonatomic, readwrite, copy, nullable) NSString *culprit;
 @property (nonatomic, readwrite, nullable) BurrowCrashFrame *culpritFrame;
 @property (nonatomic, readwrite, copy) NSString *reason;
+@property (nonatomic, readwrite) BOOL crashedWhileLoading;
 @end
 
 @implementation BurrowCrashAnalysis
@@ -294,6 +295,13 @@ static BOOL has_any_prefix(NSString *path, NSArray<NSString *> *prefixes) {
     return nil;
 }
 
+// Whether a frame runs in Burrow's loader: the release build or the test
+// build of the loader tests.
+static BOOL is_loader_frame(BurrowCrashFrame *frame) {
+    NSString *name = frame.image.name ?: frame.image.path.lastPathComponent;
+    return [name isEqualToString:@"BurrowLoader.dylib"] || [name isEqualToString:@"BurrowLoaderTesting.dylib"];
+}
+
 - (BurrowCrashAnalysis *)analyzeReport:(BurrowCrashReport *)report {
     BurrowCrashAnalysis *analysis = [[BurrowCrashAnalysis alloc] init];
     NSMutableSet<NSString *> *tweaks = [NSMutableSet set];
@@ -323,10 +331,23 @@ static BOOL has_any_prefix(NSString *path, NSArray<NSString *> *prefixes) {
     }
     analysis.culprit = culprit;
     analysis.culpritFrame = culprit ? frame : nil;
+    for (BurrowCrashFrame *candidate in report.crashedThreadFrames) {
+        if (is_loader_frame(candidate)) {
+            analysis.crashedWhileLoading = YES;
+            break;
+        }
+    }
 
     // Where it happened: the tweak to blame, or else the first frame past
-    // the crash machinery.
+    // the crash machinery. A crash while the loader was loading tweaks,
+    // with no tweak to blame, is described at the crash site itself, such
+    // as the Objective-C runtime reading a tweak's classes.
+    NSString *what = what_happened(report);
     BurrowCrashFrame *where = analysis.culpritFrame;
+    if (!culprit && analysis.crashedWhileLoading) {
+        where = report.crashedThreadFrames.firstObject;
+        what = [what stringByAppendingString:@" while the loader was loading tweaks,"];
+    }
     for (BurrowCrashFrame *candidate in report.crashedThreadFrames) {
         if (where) {
             break;
@@ -335,7 +356,6 @@ static BOOL has_any_prefix(NSString *path, NSArray<NSString *> *prefixes) {
             where = candidate;
         }
     }
-    NSString *what = what_happened(report);
     analysis.reason = shortened(where ? [NSString stringWithFormat:@"%@ in %@", what, location_of(where)] : what);
     return analysis;
 }
