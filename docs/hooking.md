@@ -228,3 +228,4 @@ Device results so far:
 | iPhone 14 Pro Max | A16 (arm64 tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.12 | All suites passed, including Objective-C |
 | iPhone 14 Pro Max | A16 (arm64 and arm64e tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.16 | All suites passed for both architectures |
 | iPhone 14 Pro Max | A16 (arm64 and arm64e tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.25 | All suites passed for both architectures, including the Theos tweak and the Substrate and libhooker functions |
+| iPhone 14 Pro Max | A16 (arm64 and arm64e tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.31 | All suites passed for both architectures, including the loader tests |
