@@ -573,6 +573,7 @@ enum {
     SUBTYPE_PTRAUTH_ABI = (int)0x80000000,
 };
 
+#if defined(__arm64e__) || defined(BURROW_LOADER_TESTING)
 // Whether a library's arm64e code uses only the ABI from before iOS 14. A
 // library with a slice for each ABI loads the new one.
 static bool uses_old_arm64e_abi(const char *path) {
@@ -619,6 +620,7 @@ static bool uses_old_arm64e_abi(const char *path) {
     }
     return old;
 }
+#endif
 
 #ifdef BURROW_LOADER_TESTING
 // Test builds only: lets the loader tests check the ABI reading.
