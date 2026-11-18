@@ -34,7 +34,8 @@ COMPAT := src/compat.c src/symbols.c
 LOADER_TEST_SOURCES := src/loader.c tests/loader/tweak.c tests/loader/target.c tests/loader_tests.c \
 	$(wildcard tests/loader/TweakInject/*.plist) scripts/build-loader-tests.sh tests/ios.entitlements \
 	$(wildcard safemode/*.h safemode/*.m) tests/safemode_tests.m tests/safemode/crash_tweak.c \
-	$(wildcard tests/safemode/CrashInject/*.plist tests/safemode/fixtures/*.ips)
+	$(wildcard tests/safemode/CrashInject/*.plist tests/safemode/fixtures/*.ips) \
+	tests/safemode/dpkg/status
 DARWIN_LIBRARY := $(PORTABLE) src/hook.c src/memory_darwin.c $(OBJC)
 
 ifeq ($(shell uname -s),Darwin)

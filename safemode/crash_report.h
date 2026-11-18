@@ -36,6 +36,9 @@ NS_ASSUME_NONNULL_BEGIN
 // The UUID of the main executable.
 @property (nonatomic, readonly, copy, nullable) NSUUID *mainImageUUID;
 @property (nonatomic, readonly, copy, nullable) NSString *incident;
+// Such as "iPhone OS 16.3.1 (20D67)" and "iPhone15,3".
+@property (nonatomic, readonly, copy, nullable) NSString *osVersion;
+@property (nonatomic, readonly, copy, nullable) NSString *deviceModel;
 @property (nonatomic, readonly, copy, nullable) NSDate *date;
 @property (nonatomic, readonly, copy, nullable) NSString *exceptionType;
 @property (nonatomic, readonly, copy, nullable) NSString *signalName;

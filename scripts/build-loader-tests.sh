@@ -7,9 +7,9 @@
 #
 # The directory gets the test build of the loader, the test tweaks in
 # TweakInject/ with their filters from tests/loader/TweakInject, the two
-# test targets and loader-tests, which runs them. For Safe Mode it gets
-# crash-target, the test tweaks in CrashInject/ that crash it, the crash
-# report fixtures and safemode-tests:
+# test targets and loader-tests, which runs them. For Safe Mode and the
+# crash log it gets crash-target, the test tweaks in CrashInject/ that crash
+# it, the crash report fixtures, a dpkg database and safemode-tests:
 #
 #   loader-tests <out-dir>
 #   safemode-tests <out-dir>
@@ -128,8 +128,9 @@ done
 cp tests/safemode/CrashInject/*.plist "$out/CrashInject/"
 mkdir -p "$out/safemode-fixtures"
 cp tests/safemode/fixtures/*.ips "$out/safemode-fixtures/"
+cp -R tests/safemode/dpkg "$out/safemode-dpkg"
 # shellcheck disable=SC2086
-"$@" $flags -fobjc-arc -Isafemode tests/safemode_tests.m safemode/crash_report.m safemode/safe_mode.m \
+"$@" $flags -fobjc-arc -Isafemode tests/safemode_tests.m safemode/*.m \
     -o "$out/safemode-tests" -framework Foundation
 sign "$out/safemode-tests" tests/ios.entitlements
 
