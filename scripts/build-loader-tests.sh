@@ -103,3 +103,7 @@ PLIST
 # shellcheck disable=SC2086
 "$@" $flags tests/loader_tests.c -o "$out/loader-tests"
 sign "$out/loader-tests" tests/ios.entitlements
+
+# Compiling and linking in one step with -g leaves .dSYM folders beside
+# each binary; the tests do not need them.
+find "$out" -name '*.dSYM' -prune -exec rm -rf {} +
