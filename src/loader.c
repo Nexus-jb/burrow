@@ -583,7 +583,11 @@ struct crash_info {
     uint64_t abort_cause;
 };
 
-__attribute__((used, section("__DATA,__crash_info"))) static struct crash_info crash_info = { .version = 5 };
+// Named as in Apple's crash reporter client, which the crash reporter looks
+// for; hidden, so each image keeps its own.
+__attribute__((used, visibility("hidden"), section("__DATA,__crash_info"))) struct crash_info gCRAnnotations = {
+    .version = 5
+};
 
 static const char CRASH_PREFIX[] = "Burrow loaded tweaks: ";
 enum { CRASH_MESSAGE_SIZE = 4096 };
@@ -612,14 +616,14 @@ static void note_tweaks(char *const *names, const size_t *loaded, size_t count, 
         snprintf(message + used, CRASH_MESSAGE_SIZE - used, "; loading: %s", loading);
     }
     crash_current ^= 1;
-    crash_info.message = (uint64_t)(uintptr_t)message;
+    gCRAnnotations.message = (uint64_t)(uintptr_t)message;
 }
 
 // Jailbreaks close the loader once its constructor returns. With tweaks
 // loaded, it stays, so that its message is in the process's crash reports.
 static void stay_loaded(void) {
     Dl_info info;
-    if (dladdr((const void *)&crash_info, &info) && info.dli_fname &&
+    if (dladdr((const void *)&gCRAnnotations, &info) && info.dli_fname &&
         !dlopen(info.dli_fname, RTLD_LAZY | RTLD_NOLOAD | RTLD_NODELETE)) {
         const char *reason = dlerror();
         os_log_error(OS_LOG_DEFAULT, "Burrow: the loader cannot stay loaded: %{public}s",
@@ -697,7 +701,7 @@ static void load_tweaks(const char *directory, const char *settings_path, const 
                 if (loaded_count) {
                     note_tweaks(names, loaded, loaded_count, NULL);
                 } else {
-                    crash_info.message = 0;
+                    gCRAnnotations.message = 0;
                 }
             }
         }
