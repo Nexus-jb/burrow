@@ -79,7 +79,11 @@ static NSArray<NSString *> *with_real_path(NSString *path) {
     for (BurrowCrashFrame *frame in report.crashedThreadFrames) {
         NSString *name = frame.image.name ?: frame.image.path.lastPathComponent;
         if ([name isEqualToString:@"BurrowLoader.dylib"]) {
-            _guardReason = [NSString stringWithFormat:@"%@ crashed inside Burrow's loader", report.processName];
+            // Even when a tweak is to blame, a trial crash goes back.
+            _guardReason = report.burrowLoadingTweak
+                               ? [NSString stringWithFormat:@"%@ crashed while Burrow's loader loaded %@",
+                                                            report.processName, report.burrowLoadingTweak]
+                               : [NSString stringWithFormat:@"%@ crashed inside Burrow's loader", report.processName];
             return;
         }
     }

@@ -54,6 +54,13 @@ opened with `RTLD_LAZY`, the mode ElleKit's loader uses.
 `burrowctl check` lists the tweaks, and the libraries they load, with the old
 ABI, and the tweaks with two `CoreFoundationVersion` numbers.
 
+The loader notes in its `__DATA,__crash_info` section which tweaks it
+loaded and which one it is opening, so that crash reports name them (see
+[safe-mode.md](safe-mode.md)). Jailbreaks close the loader once its
+constructor returns; when it loaded tweaks, it keeps itself loaded with
+`RTLD_NODELETE` so that the note stays in the process. The tests check the
+note after closing the loader.
+
 Tweaks are loaded in the order of their names, compared byte by byte, so
 `000First.dylib` loads before `Alpha.dylib`. Files whose names start with a
 dot are skipped.

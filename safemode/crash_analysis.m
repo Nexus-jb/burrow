@@ -126,6 +126,17 @@ static NSString *location_of(BurrowCrashFrame *frame) {
                                : [NSString stringWithFormat:@"%@ + 0x%llx", image, frame.imageOffset];
 }
 
+// Whether Burrow's loader is on the crashed thread.
+static BOOL crashed_in_loader(BurrowCrashReport *report) {
+    for (BurrowCrashFrame *frame in report.crashedThreadFrames) {
+        NSString *name = frame.image.name ?: frame.image.path.lastPathComponent;
+        if ([name isEqualToString:@"BurrowLoader.dylib"]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
 // What happened, without where.
 static NSString *what_happened(BurrowCrashReport *report) {
     NSString *what;
@@ -311,6 +322,19 @@ static BOOL has_any_prefix(NSString *path, NSArray<NSString *> *prefixes) {
             }
         }
     }
+    // Burrow's loader names every tweak it loaded, and the one it was opening.
+    NSMutableArray<NSString *> *noted = [NSMutableArray arrayWithArray:report.burrowLoadedTweaks ?: @[]];
+    if (report.burrowLoadingTweak) {
+        [noted addObject:report.burrowLoadingTweak];
+    }
+    for (NSString *tweak in noted) {
+        [tweaks addObject:tweak];
+        if (!paths[tweak]) {
+            paths[tweak] = _tweakPaths[tweak]
+                               ?: [_tweakDirectories.firstObject
+                                      stringByAppendingPathComponent:[tweak stringByAppendingPathExtension:@"dylib"]];
+        }
+    }
     analysis.tweaks = [tweaks.allObjects sortedArrayUsingSelector:@selector(compare:)];
     analysis.tweakPaths = paths;
 
@@ -320,6 +344,14 @@ static BOOL has_any_prefix(NSString *path, NSArray<NSString *> *prefixes) {
     NSString *culprit = [self culpritInFrames:report.lastExceptionFrames inReport:report frame:&frame];
     if (!culprit) {
         culprit = [self culpritInFrames:report.crashedThreadFrames inReport:report frame:&frame];
+    }
+    // A crash in dyld or the Objective-C runtime while Burrow's loader opened
+    // a tweak, before any of its code ran: that tweak is to blame.
+    BOOL loading = NO;
+    if (!culprit && report.burrowLoadingTweak && crashed_in_loader(report)) {
+        culprit = report.burrowLoadingTweak;
+        frame = nil;
+        loading = YES;
     }
     analysis.culprit = culprit;
     analysis.culpritFrame = culprit ? frame : nil;
@@ -336,6 +368,9 @@ static BOOL has_any_prefix(NSString *path, NSArray<NSString *> *prefixes) {
         }
     }
     NSString *what = what_happened(report);
+    if (loading) {
+        what = [NSString stringWithFormat:@"%@ while %@ was being loaded", what, culprit];
+    }
     analysis.reason = shortened(where ? [NSString stringWithFormat:@"%@ in %@", what, location_of(where)] : what);
     return analysis;
 }

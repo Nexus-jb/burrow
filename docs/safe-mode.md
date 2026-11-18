@@ -27,12 +27,33 @@ JSON header line and a JSON body. Safe Mode reads:
   reason when the report has them (reports from iOS 16 do not);
 - the crashed thread's frames and, for an uncaught Objective-C exception,
   the backtrace where it was thrown;
-- every loaded image's path and UUID.
+- the path and UUID of each image on the threads' stacks. Reports list only
+  those images, not everything the process loaded;
+- what Burrow's loader noted in the process (below).
 
 Reports hide parts of some paths, such as `/Users/USER/*/Foo.dylib`, so
 Safe Mode recognizes tweaks by UUID: it reads the UUIDs of every tweak in
 the tweak directory and matches them against the report's images. A path
 inside the tweak directory is a second way to recognize one.
+
+## What Burrow's loader leaves in a report
+
+Every image can give the crash reporter a message through its
+`__DATA,__crash_info` section, and the crash reporter copies it into the
+report's application specific information (`asi`). Burrow's loader keeps
+there the tweaks it loaded into the process, in order, and while it opens
+one, which one:
+
+```
+Burrow loaded tweaks: Alpha, Beta; loading: Gamma
+```
+
+So when Burrow's loader is in use, a report names every tweak in the
+process, even when none is on a stack, and a crash in dyld or the
+Objective-C runtime while a tweak was opened, before any of its code ran,
+is blamed on that tweak. Such a crash is how a tweak built with the old
+arm64e ABI fails without the shim (see [loader.md](loader.md)). "Tweaks
+loaded" below means these tweaks and the tweaks on the stacks.
 
 ## Who is to blame
 
@@ -42,6 +63,8 @@ of an uncaught exception, then in the crashed thread:
 - The first tweak found is to blame.
 - If the process's own code comes first (its main executable, or an app in
   the app container), the crash is the app's own, and no tweak is blamed.
+- Without a tweak on the stacks, a crash on the thread where Burrow's loader
+  was opening a tweak is blamed on that tweak.
 - Frames from the system, from Burrow and from other libraries of the
   jailbreak are passed over, but at most 12 of them. A tweak further from
   the crash is not blamed: a tweak that hooks a busy method appears in many
@@ -128,8 +151,9 @@ burrowctl crashes [N]  the N newest crashes with tweaks loaded (10)
 burrowctl events       what Safe Mode turned off, and why
 burrowctl why NAME     the newest crash report of the process NAME (or a
                        report file): the exception, the tweaks loaded, the
-                       one to blame, the images that are not Apple's, and
-                       the crashed thread
+                       one to blame, what Burrow's loader noted, the images
+                       on the stacks that are not Apple's, and the crashed
+                       thread
 burrowctl loaded NAME  the tweak loader, hooking engine and tweaks in the
                        running process NAME
 burrowctl check        the tweaks and the libraries they load that use the

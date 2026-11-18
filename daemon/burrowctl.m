@@ -214,8 +214,13 @@ static int why(BurrowServicePaths *paths, NSString *what) {
     print([NSString stringWithFormat:@"Tweaks:    %@", analysis.tweaks.count ? [analysis.tweaks componentsJoinedByString:@", "]
                                                                             : @"none loaded"]);
     print([NSString stringWithFormat:@"To blame:  %@", analysis.culprit ?: @"no single tweak"]);
-    // Everything but Apple's images and the process itself, in the report's
-    // order: a crash while a library loads shows what had come in with it.
+    if (report.burrowLoadedTweaks) {
+        print([NSString stringWithFormat:@"Burrow:    loaded %@%@",
+                                         report.burrowLoadedTweaks.count ? [report.burrowLoadedTweaks componentsJoinedByString:@", "] : @"none",
+                                         report.burrowLoadingTweak ? [@"; was loading " stringByAppendingString:report.burrowLoadingTweak] : @""]);
+    }
+    // The images on the threads' stacks that are neither Apple's nor the
+    // process itself: reports list no others.
     NSArray<NSString *> *apple = @[ @"/System/", @"/usr/lib/", @"/usr/libexec/", @"/Applications/",
                                     @"/private/preboot/Cryptexes/", @"/Developer/", @"/Library/Apple/" ];
     NSMutableArray<NSString *> *others = [NSMutableArray array];

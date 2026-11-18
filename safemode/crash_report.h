@@ -50,7 +50,14 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly, copy) NSArray<BurrowCrashFrame *> *crashedThreadFrames;
 // Where an uncaught exception was thrown; empty for other crashes.
 @property (nonatomic, readonly, copy) NSArray<BurrowCrashFrame *> *lastExceptionFrames;
+// The images on the threads' stacks. Reports list only those, not every
+// image loaded.
 @property (nonatomic, readonly, copy) NSArray<BurrowCrashImage *> *images;
+// What Burrow's loader noted in the process, when it loaded the tweaks
+// there: the tweaks it loaded, in order, and the one it was opening when the
+// process crashed. Nil when it did not load them.
+@property (nonatomic, readonly, copy, nullable) NSArray<NSString *> *burrowLoadedTweaks;
+@property (nonatomic, readonly, copy, nullable) NSString *burrowLoadingTweak;
 
 @end
 

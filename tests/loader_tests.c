@@ -156,15 +156,49 @@ static bool run_target(const char *target, const char *loader, char *output, siz
     return WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
+// The crash information message for the tweaks in expected, which lists
+// them as they loaded; the old ABI shim is not a tweak.
+static void expected_message(const char *expected, char *message, size_t size) {
+    char copy[1024];
+    snprintf(copy, sizeof copy, "%s", expected);
+    size_t used = (size_t)snprintf(message, size, "Burrow loaded tweaks: ");
+    bool any = false;
+    for (char *save = NULL, *name = strtok_r(copy, " ", &save); name; name = strtok_r(NULL, " ", &save)) {
+        if (strcmp(name, "OldABI") != 0) {
+            used += (size_t)snprintf(message + used, size - used, "%s%s", any ? ", " : "", name);
+            any = true;
+        }
+    }
+    if (!any) {
+        snprintf(message, size, "(none)");
+    }
+}
+
+// Checks which tweaks loaded, and the loader's crash information message
+// after the target closed the loader.
 static void expect(const char *test, const char *label, const char *target, const char *loader,
                    const char *expected) {
-    checks++;
-    char output[4096];
+    checks += 2;
+    char output[8192];
     bool ran = run_target(target, loader, output, sizeof output);
+    char *newline = strchr(output, '\n');
+    const char *message = newline ? newline + 1 : "";
+    if (newline) {
+        *newline = '\0';
+    }
     if (!ran || strcmp(output, expected) != 0) {
         failures++;
         fprintf(stderr, "[loader] %s, %s: expected \"%s\", got \"%s\"%s\n", test, label, expected, output,
                 ran ? "" : " (the target failed)");
+    }
+    char wanted[2048];
+    expected_message(expected, wanted, sizeof wanted);
+    // Without tweaks the loader may leave once it is closed.
+    bool none = strcmp(wanted, "(none)") == 0 && strcmp(message, "(unloaded)") == 0;
+    if (ran && strcmp(message, wanted) != 0 && !none) {
+        failures++;
+        fprintf(stderr, "[loader] %s, %s: expected the crash message \"%s\", got \"%s\"\n", test, label, wanted,
+                message);
     }
 }
 

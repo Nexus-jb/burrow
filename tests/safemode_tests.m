@@ -106,6 +106,26 @@ static void test_fixtures(NSString *fixtures, NSString *scratch) {
     CHECK(segv.date && fabs(segv.date.timeIntervalSince1970 - 1794964211.0) < 1.0);
     NSString *malformed = [fixtures stringByAppendingPathComponent:@"malformed.ips"];
     CHECK([BurrowCrashReport reportWithContentsOfFile:malformed error:NULL] == nil);
+    CHECK(segv.burrowLoadedTweaks == nil && segv.burrowLoadingTweak == nil);
+
+    // What Burrow's loader notes in the process: the tweaks it loaded, and
+    // the one it was opening when the Objective-C runtime crashed on it.
+    BurrowCrashAnalyzer *analyzer = [[BurrowCrashAnalyzer alloc]
+        initWithTweakDirectories:@[ @"/var/jb/usr/lib/TweakInject" ]
+                  jailbreakRoots:@[ @"/var/jb", RealRoot ]];
+    BurrowCrashReport *load_crash = fixture(fixtures, @"load-crash.ips");
+    CHECK([load_crash.burrowLoadedTweaks isEqualToArray:(@[ @"Alpha", @"Beta" ])]);
+    CHECK([load_crash.burrowLoadingTweak isEqualToString:@"Gamma"]);
+    BurrowCrashAnalysis *loading = [analyzer analyzeReport:load_crash];
+    CHECK([loading.tweaks isEqualToArray:(@[ @"Alpha", @"Beta", @"Gamma" ])]);
+    CHECK([loading.culprit isEqualToString:@"Gamma"]);
+    CHECK([loading.tweakPaths[@"Gamma"] isEqualToString:@"/var/jb/usr/lib/TweakInject/Gamma.dylib"]);
+    CHECK([loading.reason isEqualToString:@"EXC_BAD_ACCESS (SIGBUS) while Gamma was being loaded in dyld "
+                                          @"(dyld4::APIs::dlopen_from(char const*, int, void*) + 8)"]);
+    // Tweaks it loaded, though none is on a stack; too many for the message.
+    BurrowCrashAnalysis *noted = [analyzer analyzeReport:fixture(fixtures, @"noted.ips")];
+    CHECK([noted.tweaks isEqualToArray:@[ @"Alpha" ]]);
+    CHECK(noted.culprit == nil);
 
     // A tweak at the crash site is turned off in that process only.
     NSDictionary *event = nil;
@@ -340,6 +360,10 @@ static void test_guard(NSString *fixtures, NSString *dpkg, NSString *scratch) {
     add(@"guard-loader.ips");
     [service scan];
     CHECK([service.guardReason isEqualToString:@"Preferences crashed inside Burrow's loader"]);
+    [service resetGuard];
+    add(@"load-crash.ips");
+    [service scan];
+    CHECK([service.guardReason isEqualToString:@"SpringBoard crashed while Burrow's loader loaded Gamma"]);
 
     // Crashes from before Burrow's loader took over do not count.
     BurrowService *later = [[BurrowService alloc] initWithPaths:paths];

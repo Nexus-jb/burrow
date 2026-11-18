@@ -25,6 +25,7 @@
 #include <objc/runtime.h>
 #include <os/log.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -560,20 +561,87 @@ static bool should_load(const char *directory, const char *name, CFDictionaryRef
     return length > 0 && (size_t)length < sizeof path && tweak_matches(path, name, process, manager);
 }
 
-static void open_tweak(const char *directory, const char *name) {
+// The crash reporter copies the message in every loaded image's
+// __DATA,__crash_info section into the report's application specific
+// information. A report lists only the images on its threads' stacks, so the
+// loader keeps there the tweaks it loaded into the process, in order, and the
+// tweak it is opening, if any:
+//
+//   Burrow loaded tweaks: First, Second; loading: Third
+//
+// That names the tweaks in every crash of the process, and the tweak to blame
+// for a crash in dyld or the Objective-C runtime while a tweak loads. The
+// layout is the crash reporter's annotation structure, version 5.
+struct crash_info {
+    uint64_t version;
+    uint64_t message;
+    uint64_t signature;
+    uint64_t backtrace;
+    uint64_t message2;
+    uint64_t thread;
+    uint64_t dialog_mode;
+    uint64_t abort_cause;
+};
+
+__attribute__((used, section("__DATA,__crash_info"))) static struct crash_info crash_info = { .version = 5 };
+
+static const char CRASH_PREFIX[] = "Burrow loaded tweaks: ";
+enum { CRASH_MESSAGE_SIZE = 4096 };
+static char crash_messages[2][CRASH_MESSAGE_SIZE];
+static int crash_current;
+
+// Writes the message into the buffer not in use, then points the structure
+// at it, so that a crash report always reads a whole message.
+static void note_tweaks(char *const *names, const size_t *loaded, size_t count, const char *loading) {
+    char *message = crash_messages[crash_current ^ 1];
+    size_t used = (size_t)snprintf(message, CRASH_MESSAGE_SIZE, "%s", CRASH_PREFIX);
+    // Leave room for the tweak being opened.
+    const size_t limit = CRASH_MESSAGE_SIZE - (MAX_NAME_LENGTH + 32);
+    for (size_t i = 0; i < count; i++) {
+        size_t length = strlen(names[loaded[i]]);
+        if (used + length + 2 > limit) {
+            used += (size_t)snprintf(message + used, CRASH_MESSAGE_SIZE - used, ", ...");
+            break;
+        }
+        used += (size_t)snprintf(message + used, CRASH_MESSAGE_SIZE - used, "%s%s", i ? ", " : "", names[loaded[i]]);
+    }
+    if (count == 0) {
+        used += (size_t)snprintf(message + used, CRASH_MESSAGE_SIZE - used, "none");
+    }
+    if (loading) {
+        snprintf(message + used, CRASH_MESSAGE_SIZE - used, "; loading: %s", loading);
+    }
+    crash_current ^= 1;
+    crash_info.message = (uint64_t)(uintptr_t)message;
+}
+
+// Jailbreaks close the loader once its constructor returns. With tweaks
+// loaded, it stays, so that its message is in the process's crash reports.
+static void stay_loaded(void) {
+    Dl_info info;
+    if (dladdr((const void *)&crash_info, &info) && info.dli_fname &&
+        !dlopen(info.dli_fname, RTLD_LAZY | RTLD_NOLOAD | RTLD_NODELETE)) {
+        const char *reason = dlerror();
+        os_log_error(OS_LOG_DEFAULT, "Burrow: the loader cannot stay loaded: %{public}s",
+                     reason ? reason : "unknown error");
+    }
+}
+
+static bool open_tweak(const char *directory, const char *name) {
     char path[PATH_MAX];
     int length = snprintf(path, sizeof path, "%s/%s%s", directory, name, TWEAK_SUFFIX);
     if (length < 0 || (size_t)length >= sizeof path) {
-        return;
+        return false;
     }
     // The same mode as ElleKit's loader, which tweaks are tested with.
     if (dlopen(path, RTLD_LAZY)) {
         os_log_info(OS_LOG_DEFAULT, "Burrow: loaded %{public}s", name);
-    } else {
-        const char *reason = dlerror();
-        os_log_error(OS_LOG_DEFAULT, "Burrow: %{public}s cannot be loaded: %{public}s", name,
-                     reason ? reason : "unknown error");
+        return true;
     }
+    const char *reason = dlerror();
+    os_log_error(OS_LOG_DEFAULT, "Burrow: %{public}s cannot be loaded: %{public}s", name,
+                 reason ? reason : "unknown error");
+    return false;
 }
 
 static void free_names(char **names, size_t count) {
@@ -600,6 +668,8 @@ static void load_tweaks(const char *directory, const char *settings_path, const 
     } else {
         enum { SKIP, LOAD, LOAD_FIRST };
         unsigned char *plan = calloc(count, 1);
+        size_t *loaded = calloc(count, sizeof *loaded);
+        size_t loaded_count = 0;
         bool others = false;
         for (size_t i = 0; plan && i < count; i++) {
             bool manager;
@@ -610,18 +680,31 @@ static void load_tweaks(const char *directory, const char *settings_path, const 
         }
         // Tweak managers first, and only for the sake of other tweaks; then
         // the old ABI shim; then the other tweaks.
-        for (int pass = LOAD_FIRST; plan && others && pass >= LOAD; pass--) {
+        for (int pass = LOAD_FIRST; plan && loaded && others && pass >= LOAD; pass--) {
             if (pass == LOAD && old_abi_shim && access(old_abi_shim, F_OK) == 0 && !dlopen(old_abi_shim, RTLD_LAZY)) {
                 const char *reason = dlerror();
                 os_log_error(OS_LOG_DEFAULT, "Burrow: the old ABI shim cannot be loaded: %{public}s",
                              reason ? reason : "unknown error");
             }
             for (size_t i = 0; i < count; i++) {
-                if (plan[i] == pass) {
-                    open_tweak(directory, names[i]);
+                if (plan[i] != pass) {
+                    continue;
+                }
+                note_tweaks(names, loaded, loaded_count, names[i]);
+                if (open_tweak(directory, names[i])) {
+                    loaded[loaded_count++] = i;
+                }
+                if (loaded_count) {
+                    note_tweaks(names, loaded, loaded_count, NULL);
+                } else {
+                    crash_info.message = 0;
                 }
             }
         }
+        if (loaded_count) {
+            stay_loaded();
+        }
+        free(loaded);
         free(plan);
     }
     if (settings) {
