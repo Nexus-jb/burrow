@@ -332,6 +332,10 @@ static BOOL has_any_prefix(NSString *path, NSArray<NSString *> *prefixes) {
                    ? [NSString stringWithFormat:@"uncaught %@ (%@)", report.uncaughtExceptionName,
                                                 report.uncaughtExceptionReason]
                    : [@"uncaught " stringByAppendingString:report.uncaughtExceptionName];
+    } else if (report.lastExceptionFrames.count) {
+        // Reports from iOS 16 and earlier keep the backtrace of an uncaught
+        // exception but not its name.
+        what = [NSString stringWithFormat:@"an uncaught exception (%@)", report.signalName ?: report.exceptionType ?: @"abort"];
     } else if (report.exceptionType.length) {
         what = report.signalName.length
                    ? [NSString stringWithFormat:@"%@ (%@)", report.exceptionType, report.signalName]

@@ -15,6 +15,7 @@
 #import "safe_mode.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <math.h>
 #include <spawn.h>
@@ -133,6 +134,11 @@ static void test_fixtures(NSString *fixtures, NSString *scratch) {
         isEqualToString:@"uncaught NSInvalidArgumentException (+[NSObject fooMissing]: unrecognized selector sent to "
                         @"class 0x1f0a) in Foo.dylib (-[FooController viewDidLoad] + 4)"]);
 
+    // Older reports keep an uncaught exception's backtrace without its name.
+    CHECK(handle(safe_mode, fixtures, @"exception-unnamed.ips", &event) == BurrowSafeModeTurnedOffTweak);
+    CHECK([event[BurrowSafeModeEventReason]
+        isEqualToString:@"an uncaught exception (SIGABRT) in Bar.dylib + 0x1a2c"]);
+
     // No blame when the app's own code or too many frames come first.
     CHECK(handle(safe_mode, fixtures, @"app-fault.ips", &event) == BurrowSafeModeNoCulprit);
     CHECK(event == nil);
@@ -155,7 +161,7 @@ static void test_fixtures(NSString *fixtures, NSString *scratch) {
     CHECK([read_plist(settings)[@"DisabledInProcesses"][@"backboardd"] isEqual:@[ @"*" ]]);
 
     NSArray *events = safe_mode.events;
-    CHECK(events.count == 4);
+    CHECK(events.count == 5);
     CHECK([events.firstObject[BurrowSafeModeEventReport] isEqualToString:@"segv.ips"]);
     CHECK([events.lastObject[BurrowSafeModeEventTweak] isEqualToString:@"*"]);
 
@@ -179,7 +185,7 @@ static void test_fixtures(NSString *fixtures, NSString *scratch) {
 #pragma mark Real crashes
 
 // Runs crash-target and returns what it printed. *crashed is set when a
-// signal ended it.
+// signal ended it. What it prints while crashing on purpose is dropped.
 static NSString *run_target(NSString *target, NSString *loader, BOOL *crashed) {
     *crashed = NO;
     int fds[2];
@@ -189,6 +195,7 @@ static NSString *run_target(NSString *target, NSString *loader, BOOL *crashed) {
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
     posix_spawn_file_actions_adddup2(&actions, fds[1], STDOUT_FILENO);
+    posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
     posix_spawn_file_actions_addclose(&actions, fds[0]);
     posix_spawn_file_actions_addclose(&actions, fds[1]);
     char *argv[] = { (char *)target.fileSystemRepresentation, (char *)loader.fileSystemRepresentation, NULL };
@@ -269,7 +276,7 @@ static NSString *real_path(NSString *path) {
 // Crashes crash-target and checks that Safe Mode turns off the tweak that
 // crashed it, and nothing else.
 static void crash_and_check(BurrowSafeMode *safe_mode, NSString *target, NSString *loader, NSMutableSet *seen,
-                            NSString *tweak, NSString *reason_part) {
+                            NSString *tweak) {
     NSDate *start = [NSDate date];
     BOOL crashed = NO;
     run_target(target, loader, &crashed);
@@ -290,7 +297,11 @@ static void crash_and_check(BurrowSafeMode *safe_mode, NSString *target, NSStrin
     CHECK([safe_mode handleReport:report name:path.lastPathComponent action:&action event:&event error:&error]);
     CHECK(action == BurrowSafeModeTurnedOffTweak);
     CHECK([event[BurrowSafeModeEventTweak] isEqualToString:tweak]);
-    CHECK([event[BurrowSafeModeEventReason] containsString:reason_part]);
+    NSString *reason = event[BurrowSafeModeEventReason];
+    CHECK([reason containsString:[tweak stringByAppendingString:@".dylib"]]);
+    if (report.uncaughtExceptionName) {
+        CHECK([reason containsString:report.uncaughtExceptionName]);
+    }
     if (event) {
         printf("[safemode] %s\n", [BurrowSafeMode describeEvent:event].UTF8String);
     } else {
@@ -335,8 +346,8 @@ static void test_real_crashes(NSString *dir, NSString *scratch) {
                                                                        statePath:state];
     NSMutableSet *seen = [NSMutableSet set];
     // Tweaks load by name: Innocent, then SegvTweak, then ThrowTweak.
-    crash_and_check(safe_mode, target, loader, seen, @"SegvTweak", @"SegvTweak.dylib");
-    crash_and_check(safe_mode, target, loader, seen, @"ThrowTweak", @"NSInvalidArgumentException");
+    crash_and_check(safe_mode, target, loader, seen, @"SegvTweak");
+    crash_and_check(safe_mode, target, loader, seen, @"ThrowTweak");
 
     BOOL crashed = YES;
     NSString *output = run_target(target, loader, &crashed);
