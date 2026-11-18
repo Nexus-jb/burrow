@@ -64,6 +64,11 @@ for tweak in $tweaks; do
         -Wl,-U,_burrow_loader_record tests/loader/tweak.c -o "$out/TweakInject/$tweak.dylib"
     sign "$out/TweakInject/$tweak.dylib"
 done
+# Stands in for the old arm64e ABI shim, outside the tweak directory.
+# shellcheck disable=SC2086
+"$@" $flags -dynamiclib -DBURROW_TWEAK_NAME='"OldABI"' -install_name @rpath/OldABI.dylib \
+    -Wl,-U,_burrow_loader_record tests/loader/tweak.c -o "$out/OldABI.dylib"
+sign "$out/OldABI.dylib"
 # Its filter matches every process, but the file is not a library.
 printf 'not a library\n' > "$out/TweakInject/Broken.dylib"
 cp tests/loader/TweakInject/*.plist "$out/TweakInject/"

@@ -21,6 +21,9 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <libkern/OSByteOrder.h>
+#include <mach-o/fat.h>
+#include <mach-o/loader.h>
 #include <limits.h>
 #include <math.h>
 #include <spawn.h>
@@ -417,8 +420,34 @@ static void test_switch(NSString *scratch) {
     CHECK(![files destinationOfSymbolicLinkAtPath:diverted error:NULL]);
 }
 
-// Reading what a process has loaded, on this very process.
-static void test_inspect(void) {
+// Reading what a process has loaded, on this very process, and reading
+// arm64e ABIs from Mach-O headers.
+static void test_inspect(NSString *scratch) {
+    uint8_t thin[32] = { 0 };
+    uint32_t magic = MH_MAGIC_64, type = CPU_TYPE_ARM64;
+    memcpy(thin, &magic, 4);
+    memcpy(thin + 4, &type, 4);
+    uint32_t subtypes[] = { 2, 0x80000002u, 0x81000002u, 0 };
+    NSString *expected[] = { @"old", @"new", @"new", @"" };
+    for (size_t i = 0; i < 4; i++) {
+        memcpy(thin + 8, &subtypes[i], 4);
+        NSString *path = [scratch stringByAppendingPathComponent:[NSString stringWithFormat:@"abi-%zu.dylib", i]];
+        [[NSData dataWithBytes:thin length:sizeof thin] writeToFile:path atomically:YES];
+        NSString *abi = BurrowArm64eABI(path);
+        CHECK(expected[i].length ? [abi isEqualToString:expected[i]] : abi == nil);
+    }
+    // A fat file: an arm64 slice and an old arm64e slice, big-endian.
+    uint8_t fat[8 + 2 * 20] = { 0 };
+    uint32_t big[] = { OSSwapHostToBigInt32(FAT_MAGIC), OSSwapHostToBigInt32(2) };
+    memcpy(fat, big, 8);
+    uint32_t arm64[] = { OSSwapHostToBigInt32(CPU_TYPE_ARM64), OSSwapHostToBigInt32(0) };
+    uint32_t arm64e[] = { OSSwapHostToBigInt32(CPU_TYPE_ARM64), OSSwapHostToBigInt32(2) };
+    memcpy(fat + 8, arm64, 8);
+    memcpy(fat + 28, arm64e, 8);
+    NSString *fat_path = [scratch stringByAppendingPathComponent:@"abi-fat.dylib"];
+    [[NSData dataWithBytes:fat length:sizeof fat] writeToFile:fat_path atomically:YES];
+    CHECK([BurrowArm64eABI(fat_path) isEqualToString:@"old"]);
+
     NSString *name = NSProcessInfo.processInfo.processName;
     CHECK([BurrowProcessesNamed(name.length > 16 ? [name substringToIndex:16] : name) containsObject:@(getpid())]);
     NSArray<NSString *> *mapped = BurrowMappedFiles(getpid());
@@ -668,7 +697,7 @@ int main(int argc, char **argv) {
         test_guard([dir stringByAppendingPathComponent:@"safemode-fixtures"],
                    [dir stringByAppendingPathComponent:@"safemode-dpkg"], scratch);
         test_switch(scratch);
-        test_inspect();
+        test_inspect(scratch);
         test_real_crashes(dir, scratch);
         [[NSFileManager defaultManager] removeItemAtPath:scratch error:NULL];
 

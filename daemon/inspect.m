@@ -2,6 +2,9 @@
 
 #import "inspect.h"
 
+#include <libkern/OSByteOrder.h>
+#include <mach-o/fat.h>
+#include <mach-o/loader.h>
 #include <stddef.h>
 #include <sys/param.h>
 #include <sys/sysctl.h>
@@ -134,4 +137,58 @@ NSArray<NSString *> *BurrowMappedFiles(pid_t pid) {
         address = next;
     }
     return any ? paths.array : nil;
+}
+
+// cpusubtype values of an arm64e slice: the subtype in the low byte, and
+// from the iOS 14 ABI on, a flag for its versioned pointer authentication.
+enum {
+    BURROW_SUBTYPE_ARM64E = 2,
+    BURROW_SUBTYPE_PTRAUTH_ABI = (int)0x80000000,
+};
+
+static NSString *abi_of(cpu_type_t type, cpu_subtype_t subtype) {
+    if (type != CPU_TYPE_ARM64 || (subtype & 0xff) != BURROW_SUBTYPE_ARM64E) {
+        return nil;
+    }
+    return (subtype & BURROW_SUBTYPE_PTRAUTH_ABI) ? @"new" : @"old";
+}
+
+NSString *BurrowArm64eABI(NSString *path) {
+    NSFileHandle *file = [NSFileHandle fileHandleForReadingAtPath:path];
+    NSData *data = [file readDataOfLength:4096];
+    [file closeFile];
+    if (data.length < sizeof(struct mach_header)) {
+        return nil;
+    }
+    const uint8_t *bytes = data.bytes;
+    uint32_t magic;
+    memcpy(&magic, bytes, sizeof magic);
+    if (magic == MH_MAGIC_64 || magic == MH_MAGIC) {
+        struct mach_header header;
+        memcpy(&header, bytes, sizeof header);
+        return abi_of(header.cputype, header.cpusubtype);
+    }
+    // Fat headers are big-endian.
+    uint32_t fat_magic = OSSwapBigToHostInt32(magic);
+    if (fat_magic != FAT_MAGIC && fat_magic != FAT_MAGIC_64) {
+        return nil;
+    }
+    struct fat_header fat;
+    memcpy(&fat, bytes, sizeof fat);
+    uint32_t count = OSSwapBigToHostInt32(fat.nfat_arch);
+    size_t entry = fat_magic == FAT_MAGIC ? sizeof(struct fat_arch) : sizeof(struct fat_arch_64);
+    NSString *found = nil;
+    for (uint32_t i = 0; i < count && sizeof fat + (i + 1) * entry <= data.length; i++) {
+        // Both entry layouts start with cputype and cpusubtype.
+        struct fat_arch arch;
+        memcpy(&arch, bytes + sizeof fat + i * entry, sizeof arch);
+        NSString *abi = abi_of((cpu_type_t)OSSwapBigToHostInt32((uint32_t)arch.cputype),
+                               (cpu_subtype_t)OSSwapBigToHostInt32((uint32_t)arch.cpusubtype));
+        // A file with both slices loads the new one; old matters only alone.
+        if ([abi isEqualToString:@"new"]) {
+            return abi;
+        }
+        found = abi ?: found;
+    }
+    return found;
 }

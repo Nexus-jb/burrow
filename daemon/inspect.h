@@ -13,4 +13,9 @@ NSArray<NSNumber *> *BurrowProcessesNamed(NSString *name);
 // read (reading another user's process needs root).
 NSArray<NSString *> *_Nullable BurrowMappedFiles(pid_t pid);
 
+// The arm64e ABI of a Mach-O file's arm64e slice: "new" for the ABI of
+// iOS 14 and later, "old" for the one before, or nil without an arm64e
+// slice.
+NSString *_Nullable BurrowArm64eABI(NSString *path);
+
 NS_ASSUME_NONNULL_END

@@ -11,6 +11,9 @@
 // it. A tweak without a filter is not loaded. A tweak whose property list sets
 // IsTweakManager, such as one that turns tweaks off per app, is loaded
 // before every other tweak, and only when another tweak is loaded too.
+// Like ElleKit's loader, this one opens the old arm64e ABI shim, when it is
+// installed, after the tweak managers and before the other tweaks: tweaks
+// built with the arm64e ABI from before iOS 14 crash without it.
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <dirent.h>
@@ -564,7 +567,8 @@ static void open_tweak(const char *directory, const char *name) {
     if (length < 0 || (size_t)length >= sizeof path) {
         return;
     }
-    if (dlopen(path, RTLD_LAZY | RTLD_GLOBAL)) {
+    // The same mode as ElleKit's loader, which tweaks are tested with.
+    if (dlopen(path, RTLD_LAZY)) {
         os_log_info(OS_LOG_DEFAULT, "Burrow: loaded %{public}s", name);
     } else {
         const char *reason = dlerror();
@@ -580,7 +584,7 @@ static void free_names(char **names, size_t count) {
     free(names);
 }
 
-static void load_tweaks(const char *directory, const char *settings_path) {
+static void load_tweaks(const char *directory, const char *settings_path, const char *old_abi_shim) {
     char **names;
     size_t count = list_tweaks(directory, &names);
     struct process process;
@@ -605,8 +609,14 @@ static void load_tweaks(const char *directory, const char *settings_path) {
                 others = others || !manager;
             }
         }
-        // Tweak managers first, and only for the sake of other tweaks.
+        // Tweak managers first, and only for the sake of other tweaks; then
+        // the old ABI shim; then the other tweaks.
         for (int pass = LOAD_FIRST; plan && others && pass >= LOAD; pass--) {
+            if (pass == LOAD && old_abi_shim && access(old_abi_shim, F_OK) == 0 && !dlopen(old_abi_shim, RTLD_LAZY)) {
+                const char *reason = dlerror();
+                os_log_error(OS_LOG_DEFAULT, "Burrow: the old ABI shim cannot be loaded: %{public}s",
+                             reason ? reason : "unknown error");
+            }
             for (size_t i = 0; i < count; i++) {
                 if (plan[i] == pass) {
                     open_tweak(directory, names[i]);
@@ -642,12 +652,15 @@ __attribute__((constructor)) static void burrow_loader_start(void) {
     // Test builds only: the loader tests choose both paths.
     const char *directory = getenv("BURROW_TEST_TWEAK_DIRECTORY");
     const char *settings = getenv("BURROW_TEST_LOADER_SETTINGS");
+    const char *old_abi_shim = getenv("BURROW_TEST_OLD_ABI_SHIM");
     if (!directory || !settings) {
         return;
     }
 #else
     const char *directory = BURROW_JBROOT "/usr/lib/TweakInject";
     const char *settings = BURROW_JBROOT "/etc/burrow/loader.plist";
+    // Where ElleKit's loader looks for it.
+    const char *old_abi_shim = BURROW_JBROOT "/usr/lib/ellekit/OldABI.dylib";
 #endif
-    load_tweaks(directory, settings);
+    load_tweaks(directory, settings, old_abi_shim);
 }

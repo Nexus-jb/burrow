@@ -8,6 +8,8 @@
 //   burrowctl events          what Safe Mode turned off, and why
 //   burrowctl loaded NAME     the tweak loader, hooking engine and tweaks in
 //                             the running processes called NAME (as root)
+//   burrowctl check           the tweaks that need the old arm64e ABI shim,
+//                             and whether it is installed
 //   burrowctl why NAME|FILE   the newest crash report of the process NAME, or
 //                             the report FILE: what happened, and where
 //   burrowctl loader burrow   make Burrow's loader the system's tweak loader
@@ -230,6 +232,34 @@ static int why(BurrowServicePaths *paths, NSString *what) {
     return 0;
 }
 
+static NSString *const OldABIShim = @"/var/jb/usr/lib/ellekit/OldABI.dylib";
+
+static int check(BurrowServicePaths *paths) {
+    NSFileManager *files = [NSFileManager defaultManager];
+    NSString *directory = paths.tweakDirectories.firstObject;
+    NSMutableArray<NSString *> *old = [NSMutableArray array];
+    NSUInteger count = 0;
+    for (NSString *name in [[files contentsOfDirectoryAtPath:directory error:NULL]
+             sortedArrayUsingSelector:@selector(compare:)]) {
+        if ([name hasPrefix:@"."] || ![name.pathExtension isEqualToString:@"dylib"]) {
+            continue;
+        }
+        count++;
+        if ([BurrowArm64eABI([directory stringByAppendingPathComponent:name]) isEqualToString:@"old"]) {
+            [old addObject:name.stringByDeletingPathExtension];
+        }
+    }
+    BOOL shim = [files fileExistsAtPath:OldABIShim];
+    print([NSString stringWithFormat:@"Tweaks:          %lu in %@", (unsigned long)count, directory]);
+    print([NSString stringWithFormat:@"Old arm64e ABI:  %@", old.count ? [old componentsJoinedByString:@", "] : @"none"]);
+    print([NSString stringWithFormat:@"OldABI shim:     %@", shim ? @"installed" : @"not installed"]);
+    if (old.count && !shim) {
+        print(@"Tweaks with the old arm64e ABI crash arm64e processes without the shim.");
+        return 1;
+    }
+    return 0;
+}
+
 static int loader(NSString *which) {
     if (geteuid() != 0) {
         print(@"Switching the tweak loader needs root.");
@@ -314,6 +344,9 @@ int main(int argc, char **argv) {
         if ([command isEqualToString:@"events"] && argc <= 2) {
             return events(paths);
         }
+        if ([command isEqualToString:@"check"] && argc == 2) {
+            return check(paths);
+        }
         if ([command isEqualToString:@"why"] && argc == 3) {
             return why(paths, @(argv[2]));
         }
@@ -326,7 +359,7 @@ int main(int argc, char **argv) {
                 return result;
             }
         }
-        fprintf(stderr, "usage: burrowctl status | crashes [count] | events | why NAME|FILE | loaded NAME | "
+        fprintf(stderr, "usage: burrowctl status | crashes [count] | events | check | why NAME|FILE | loaded NAME | "
                         "loader burrow|ellekit\n");
         return 2;
     }

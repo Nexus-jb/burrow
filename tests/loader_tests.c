@@ -33,8 +33,9 @@ extern char **environ;
 // has no bundle identifier and has the class BurrowLoaderPlainClass;
 // LoaderTarget has the bundle identifier com.nexusjb.burrow-tests.loader-target.
 // zManager is a tweak manager: it loads first, though its name sorts last.
-#define PLAIN_ALL "zManager 000First AnyMode ClassFilter Executable NewCF OpenStep"
-#define APP_ALL "zManager 000First AppBundle EitherKey LowercaseBundle NewCF"
+// OldABI, the stand-in for the old arm64e ABI shim, comes next.
+#define PLAIN_ALL "zManager OldABI 000First AnyMode ClassFilter Executable NewCF OpenStep"
+#define APP_ALL "zManager OldABI 000First AppBundle EitherKey LowercaseBundle NewCF"
 
 struct settings_case {
     const char *name;
@@ -53,11 +54,11 @@ static const struct settings_case CASES[] = {
     { "empty settings", "<dict/>", true, NULL, PLAIN_ALL, APP_ALL },
     { "off everywhere",
       "<dict><key>DisabledTweaks</key><array><string>NewCF</string></array></dict>", true, NULL,
-      "zManager 000First AnyMode ClassFilter Executable OpenStep", "zManager 000First AppBundle EitherKey LowercaseBundle" },
+      "zManager OldABI 000First AnyMode ClassFilter Executable OpenStep", "zManager OldABI 000First AppBundle EitherKey LowercaseBundle" },
     { "off by executable name",
       "<dict><key>DisabledInProcesses</key><dict><key>loader-target</key>"
       "<array><string>Executable</string><string>OpenStep</string></array></dict></dict>",
-      true, NULL, "zManager 000First AnyMode ClassFilter NewCF", APP_ALL },
+      true, NULL, "zManager OldABI 000First AnyMode ClassFilter NewCF", APP_ALL },
     { "all off by bundle identifier",
       "<dict><key>DisabledInProcesses</key><dict><key>com.nexusjb.burrow-tests.loader-target</key>"
       "<array><string>*</string></array></dict></dict>",
@@ -65,7 +66,7 @@ static const struct settings_case CASES[] = {
     { "off by app executable name",
       "<dict><key>DisabledInProcesses</key><dict><key>LoaderTarget</key>"
       "<array><string>AppBundle</string></array></dict></dict>",
-      true, NULL, PLAIN_ALL, "zManager 000First EitherKey LowercaseBundle NewCF" },
+      true, NULL, PLAIN_ALL, "zManager OldABI 000First EitherKey LowercaseBundle NewCF" },
     // A tweak manager alone is not loaded.
     { "only the tweak manager left",
       "<dict><key>DisabledInProcesses</key><dict><key>LoaderTarget</key>"
@@ -178,9 +179,9 @@ int main(int argc, char **argv) {
         return 2;
     }
     const char *dir = argv[1];
-    char loader[PATH_MAX], tweaks[PATH_MAX], plain[PATH_MAX], app[PATH_MAX];
+    char loader[PATH_MAX], tweaks[PATH_MAX], plain[PATH_MAX], app[PATH_MAX], shim[PATH_MAX];
     if (!join(loader, dir, "BurrowLoaderTesting.dylib") || !join(tweaks, dir, "TweakInject") ||
-        !join(plain, dir, "loader-target") || !join(app, dir, APP_EXECUTABLE)) {
+        !join(plain, dir, "loader-target") || !join(app, dir, APP_EXECUTABLE) || !join(shim, dir, "OldABI.dylib")) {
         fprintf(stderr, "[loader] path too long\n");
         return 1;
     }
@@ -194,6 +195,7 @@ int main(int argc, char **argv) {
     join(settings, scratch, "loader.plist");
     setenv("BURROW_TEST_TWEAK_DIRECTORY", tweaks, 1);
     setenv("BURROW_TEST_LOADER_SETTINGS", settings, 1);
+    setenv("BURROW_TEST_OLD_ABI_SHIM", shim, 1);
 
     for (size_t i = 0; i < sizeof CASES / sizeof CASES[0]; i++) {
         const struct settings_case *test = &CASES[i];
