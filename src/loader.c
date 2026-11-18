@@ -27,6 +27,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "legacy_abi.h"
 #include "pac.h"
 
 #ifndef BURROW_JBROOT
@@ -529,6 +530,62 @@ static size_t list_tweaks(const char *directory, char ***names) {
     return count;
 }
 
+static bool read_file(void *context, uint64_t offset, void *buffer, size_t size) {
+    int fd = *(const int *)context;
+    size_t done = 0;
+    while (done < size) {
+        ssize_t count = pread(fd, (char *)buffer + done, size - done, (off_t)(offset + done));
+        if (count < 0 && errno == EINTR) {
+            continue;
+        }
+        if (count <= 0) {
+            return false;
+        }
+        done += (size_t)count;
+    }
+    return true;
+}
+
+// Whether this process is an arm64e process, where tweaks built for the old
+// arm64e ABI with classes or categories of their own crash while they load
+// (see legacy_abi.h). Test builds for other architectures check as if they
+// were in one when BURROW_TEST_ARM64E_CHECK is 1.
+static bool checks_arm64e_abi(void) {
+#if defined(__arm64e__)
+    return true;
+#elif defined(BURROW_LOADER_TESTING)
+    const char *value = getenv("BURROW_TEST_ARM64E_CHECK");
+    return value && strcmp(value, "1") == 0;
+#else
+    return false;
+#endif
+}
+
+static bool built_for_this_process(const char *directory, const char *name) {
+    if (!checks_arm64e_abi()) {
+        return true;
+    }
+    char path[PATH_MAX];
+    int length = snprintf(path, sizeof path, "%s/%s%s", directory, name, TWEAK_SUFFIX);
+    if (length < 0 || (size_t)length >= sizeof path) {
+        return true;
+    }
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        return true;  // dlopen reports it.
+    }
+    bool legacy = burrow_has_legacy_arm64e_objc(read_file, &fd);
+    close(fd);
+    if (legacy) {
+        os_log_error(OS_LOG_DEFAULT,
+                     "Burrow: %{public}s is not loaded: it is built for the old arm64e ABI and has Objective-C "
+                     "classes or categories, which crash this process while it loads. It needs a build with a "
+                     "current toolchain.",
+                     name);
+    }
+    return !legacy;
+}
+
 // Whether a tweak is to be loaded here, and whether it is a tweak manager.
 static bool should_load(const char *directory, const char *name, CFDictionaryRef settings, struct process *process,
                         bool *manager) {
@@ -545,7 +602,8 @@ static bool should_load(const char *directory, const char *name, CFDictionaryRef
     }
     char path[PATH_MAX];
     int length = snprintf(path, sizeof path, "%s/%s.plist", directory, name);
-    return length > 0 && (size_t)length < sizeof path && tweak_matches(path, name, process, manager);
+    return length > 0 && (size_t)length < sizeof path && tweak_matches(path, name, process, manager) &&
+           built_for_this_process(directory, name);
 }
 
 static void open_tweak(const char *directory, const char *name) {
