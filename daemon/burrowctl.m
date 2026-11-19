@@ -568,7 +568,8 @@ static int tweaks_report(BurrowServicePaths *paths) {
     NSArray<NSString *> *engineNames =
         @[ @"CydiaSubstrate", @"libsubstrate.dylib", @"libhooker.dylib", @"libblackjack.dylib", @"libellekit.dylib" ];
 
-    NSUInteger runningCount = 0, crashedCount = 0, offCount = 0;
+    NSUInteger runningCount = 0, crashedCount = 0, crashedSinceCount = 0, offCount = 0;
+    NSDate *loaderSince = BurrowLoaderActiveSince();
     for (NSString *tweak in names) {
         NSString *path = [directory stringByAppendingPathComponent:[tweak stringByAppendingPathExtension:@"dylib"]];
         NSDictionary *package = [packages packageForLibrary:path];
@@ -596,11 +597,25 @@ static int tweaks_report(BurrowServicePaths *paths) {
                                          running_list(where, [executables isKindOfClass:[NSArray class]] ? executables : @[])]);
         NSArray<NSDictionary *> *its = crashes[tweak];
         crashedCount += its.count > 0;
-        print([NSString stringWithFormat:@"  crashes:    %@",
-                                         its.count ? [NSString stringWithFormat:@"%lu, last %@ in %@", (unsigned long)its.count,
-                                                                                format_date(its.lastObject[BurrowCrashLogDate]),
-                                                                                its.lastObject[BurrowCrashLogProcess]]
-                                                   : @"none"]);
+        NSMutableString *crashText = [NSMutableString stringWithString:@"none"];
+        if (its.count) {
+            [crashText setString:[NSString stringWithFormat:@"%lu, last %@ in %@", (unsigned long)its.count,
+                                                           format_date(its.lastObject[BurrowCrashLogDate]),
+                                                           its.lastObject[BurrowCrashLogProcess]]];
+            // The gate counts the crashes under Burrow's loader; older ones
+            // happened under ElleKit's.
+            if (loaderSince) {
+                NSUInteger since = 0;
+                for (NSDictionary *entry in its) {
+                    NSDate *date = entry[BurrowCrashLogDate];
+                    since += [date isKindOfClass:[NSDate class]] && [date compare:loaderSince] != NSOrderedAscending;
+                }
+                crashedSinceCount += since > 0;
+                [crashText appendFormat:@"; %@ since Burrow's loader took over",
+                                        since ? [NSString stringWithFormat:@"%lu", (unsigned long)since] : @"none"];
+            }
+        }
+        print([NSString stringWithFormat:@"  crashes:    %@", crashText]);
         NSMutableArray<NSString *> *off = [NSMutableArray array];
         if ([disabled containsObject:tweak]) {
             [off addObject:@"everywhere"];
@@ -617,11 +632,15 @@ static int tweaks_report(BurrowServicePaths *paths) {
                                              [off componentsJoinedByString:@", "], tweak]);
         }
     }
+    NSString *crashSummary = [NSString stringWithFormat:@"%lu with crashes", (unsigned long)crashedCount];
+    if (loaderSince) {
+        crashSummary = [crashSummary stringByAppendingFormat:@" (%lu since Burrow's loader took over on %@)",
+                                                             (unsigned long)crashedSinceCount, format_date(loaderSince)];
+    }
     print([NSString stringWithFormat:@"%lu tweaks: %lu running now, %lu not running (open what they are for), "
-                                     @"%lu with crashes, %lu turned off somewhere",
+                                     @"%@, %lu turned off somewhere",
                                      (unsigned long)names.count, (unsigned long)runningCount,
-                                     (unsigned long)(names.count - runningCount), (unsigned long)crashedCount,
-                                     (unsigned long)offCount]);
+                                     (unsigned long)(names.count - runningCount), crashSummary, (unsigned long)offCount]);
     if (unread) {
         print([NSString stringWithFormat:@"%lu processes could not be read; run burrowctl as root to see them all.",
                                          (unsigned long)unread]);
