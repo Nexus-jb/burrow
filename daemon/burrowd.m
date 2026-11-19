@@ -8,6 +8,7 @@
 
 #import "service.h"
 #import "state.h"
+#import "switch.h"
 
 #include <fcntl.h>
 #include <os/log.h>
@@ -35,8 +36,26 @@ int main(void) {
         dispatch_queue_t queue = dispatch_queue_create("com.nexusjb.burrowd", DISPATCH_QUEUE_SERIAL);
         void (^scan)(void) = ^{
             @autoreleasepool {
-                service.safeModeSince = BurrowLoaderActiveSince();
+                NSDate *since = BurrowLoaderActiveSince();
+                service.safeModeSince = since;
+                service.guardSince = since;
+                NSDictionary *trial = [NSDictionary dictionaryWithContentsOfFile:BurrowTrialPath];
+                service.guardTrialUntil = [trial[@"Until"] isKindOfClass:[NSDate class]] ? trial[@"Until"] : nil;
                 NSUInteger logged = [service scan];
+                if (since && service.guardReason) {
+                    // The guard: back to the jailbreak's own loader.
+                    NSString *reason = service.guardReason;
+                    NSError *error = nil;
+                    if ([[BurrowSwitch systemSwitch] useElleKitLoader:&error]) {
+                        os_log_error(OS_LOG_DEFAULT, "burrowd: back to ElleKit's loader: %{public}@", reason);
+                        [@{ @"Date" : [NSDate date], @"Reason" : reason } writeToFile:BurrowGuardPath atomically:YES];
+                        [[NSFileManager defaultManager] removeItemAtPath:BurrowTrialPath error:NULL];
+                    } else {
+                        os_log_error(OS_LOG_DEFAULT, "burrowd: cannot go back to ElleKit's loader: %{public}@",
+                                     error.localizedDescription);
+                    }
+                    [service resetGuard];
+                }
                 if (logged) {
                     os_log(OS_LOG_DEFAULT, "burrowd: logged %lu crashes", (unsigned long)logged);
                 }

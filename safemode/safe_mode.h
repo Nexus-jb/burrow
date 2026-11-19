@@ -32,6 +32,7 @@ extern NSString *const BurrowSafeModeEventProcess;  // bundle identifier or exec
 extern NSString *const BurrowSafeModeEventTweak;    // tweak name, or "*" for every tweak
 extern NSString *const BurrowSafeModeEventReason;   // one line for people
 extern NSString *const BurrowSafeModeEventReport;   // the crash report's file name
+extern NSString *const BurrowSafeModeEventAction;   // "on" when a tweak was turned back on; absent otherwise
 
 @interface BurrowSafeMode : NSObject
 
@@ -59,6 +60,14 @@ extern NSString *const BurrowSafeModeEventReport;   // the crash report's file n
               action:(BurrowSafeModeAction *)action
                event:(NSDictionary *_Nullable *_Nullable)event
                error:(NSError **)error;
+
+// Turns a tweak back on in one process, or in every process with process
+// nil, by taking it off the processes' lists in the loader settings; "*"
+// undoes "every tweak". Records an event for each process. Returns the
+// processes it changed, which may be none, or nil on failure.
+- (nullable NSArray<NSString *> *)turnOnTweak:(NSString *)tweak
+                                    inProcess:(nullable NSString *)process
+                                        error:(NSError **)error;
 
 // Every recorded event, oldest first.
 - (NSArray<NSDictionary *> *)events;

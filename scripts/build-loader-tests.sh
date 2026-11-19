@@ -36,7 +36,7 @@ esac
 flags="-std=gnu11 -Wall -Wextra -Werror -Wshadow -Wstrict-prototypes -Wmissing-prototypes -O2 -g -Iinclude -Isrc"
 ldid=${LDID:-ldid}
 # NoPlist has no filter. BadPlist's filter cannot be read.
-tweaks="000First AllFilters AllFiltersMiss AnyMode AppBundle BadPlist ClassFilter EmptyFilter Executable FutureCF NewCF NoPlist OldCFRange OpenStep zManager"
+tweaks="000First AnyMode AppBundle BadPlist ClassFilter CurrentCFRange EitherKey EmptyFilter Executable FutureCF LowercaseBundle NewCF NoPlist OldCFRange OnlyCF OpenStep zManager"
 
 # sign <file> [entitlements]
 sign() {
@@ -64,6 +64,11 @@ for tweak in $tweaks; do
         -Wl,-U,_burrow_loader_record tests/loader/tweak.c -o "$out/TweakInject/$tweak.dylib"
     sign "$out/TweakInject/$tweak.dylib"
 done
+# Stands in for the old arm64e ABI shim, outside the tweak directory.
+# shellcheck disable=SC2086
+"$@" $flags -dynamiclib -DBURROW_TWEAK_NAME='"OldABI"' -install_name @rpath/OldABI.dylib \
+    -Wl,-U,_burrow_loader_record tests/loader/tweak.c -o "$out/OldABI.dylib"
+sign "$out/OldABI.dylib"
 # Its filter matches every process, but the file is not a library.
 printf 'not a library\n' > "$out/TweakInject/Broken.dylib"
 cp tests/loader/TweakInject/*.plist "$out/TweakInject/"
@@ -130,7 +135,7 @@ mkdir -p "$out/safemode-fixtures"
 cp tests/safemode/fixtures/*.ips "$out/safemode-fixtures/"
 cp -R tests/safemode/dpkg "$out/safemode-dpkg"
 # shellcheck disable=SC2086
-"$@" $flags -fobjc-arc -Isafemode tests/safemode_tests.m safemode/*.m \
+"$@" $flags -fobjc-arc -Isafemode -Idaemon tests/safemode_tests.m safemode/*.m daemon/switch.m daemon/inspect.m \
     -o "$out/safemode-tests" -framework Foundation
 sign "$out/safemode-tests" tests/ios.entitlements
 

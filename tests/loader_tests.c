@@ -11,8 +11,12 @@
 // and LoaderTarget.app.
 
 #include <TargetConditionals.h>
+#include <dlfcn.h>
 #include <errno.h>
+#include <libkern/OSByteOrder.h>
 #include <limits.h>
+#include <mach-o/fat.h>
+#include <mach-o/loader.h>
 #include <spawn.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -33,8 +37,9 @@ extern char **environ;
 // has no bundle identifier and has the class BurrowLoaderPlainClass;
 // LoaderTarget has the bundle identifier com.nexusjb.burrow-tests.loader-target.
 // zManager is a tweak manager: it loads first, though its name sorts last.
-#define PLAIN_ALL "zManager 000First AnyMode ClassFilter Executable NewCF OpenStep"
-#define APP_ALL "zManager 000First AllFilters AppBundle NewCF"
+// OldABI, the stand-in for the old arm64e ABI shim, comes next.
+#define PLAIN_ALL "zManager OldABI 000First AnyMode ClassFilter Executable NewCF OpenStep"
+#define APP_ALL "zManager OldABI 000First AppBundle EitherKey LowercaseBundle NewCF"
 
 struct settings_case {
     const char *name;
@@ -53,11 +58,11 @@ static const struct settings_case CASES[] = {
     { "empty settings", "<dict/>", true, NULL, PLAIN_ALL, APP_ALL },
     { "off everywhere",
       "<dict><key>DisabledTweaks</key><array><string>NewCF</string></array></dict>", true, NULL,
-      "zManager 000First AnyMode ClassFilter Executable OpenStep", "zManager 000First AllFilters AppBundle" },
+      "zManager OldABI 000First AnyMode ClassFilter Executable OpenStep", "zManager OldABI 000First AppBundle EitherKey LowercaseBundle" },
     { "off by executable name",
       "<dict><key>DisabledInProcesses</key><dict><key>loader-target</key>"
       "<array><string>Executable</string><string>OpenStep</string></array></dict></dict>",
-      true, NULL, "zManager 000First AnyMode ClassFilter NewCF", APP_ALL },
+      true, NULL, "zManager OldABI 000First AnyMode ClassFilter NewCF", APP_ALL },
     { "all off by bundle identifier",
       "<dict><key>DisabledInProcesses</key><dict><key>com.nexusjb.burrow-tests.loader-target</key>"
       "<array><string>*</string></array></dict></dict>",
@@ -65,12 +70,12 @@ static const struct settings_case CASES[] = {
     { "off by app executable name",
       "<dict><key>DisabledInProcesses</key><dict><key>LoaderTarget</key>"
       "<array><string>AppBundle</string></array></dict></dict>",
-      true, NULL, PLAIN_ALL, "zManager 000First AllFilters NewCF" },
+      true, NULL, PLAIN_ALL, "zManager OldABI 000First EitherKey LowercaseBundle NewCF" },
     // A tweak manager alone is not loaded.
     { "only the tweak manager left",
       "<dict><key>DisabledInProcesses</key><dict><key>LoaderTarget</key>"
-      "<array><string>000First</string><string>AllFilters</string><string>AppBundle</string>"
-      "<string>NewCF</string><string>Broken</string></array></dict></dict>",
+      "<array><string>000First</string><string>AppBundle</string><string>EitherKey</string>"
+      "<string>LowercaseBundle</string><string>NewCF</string><string>Broken</string></array></dict></dict>",
       true, NULL, PLAIN_ALL, "" },
     // The Substrate safe mode variables load nothing.
     { "_MSSafeMode", NULL, false, "_MSSafeMode=1", "", "" },
@@ -172,15 +177,82 @@ static bool join(char *out, const char *dir, const char *name) {
     return length > 0 && length < PATH_MAX;
 }
 
+// Writes a Mach-O header: a thin arm64 file with one subtype, or a fat file
+// with one arm64 slice per subtype.
+static bool write_header(const char *path, bool fat, const uint32_t *subtypes, size_t count) {
+    uint8_t data[256] = { 0 };
+    size_t size;
+    if (!fat) {
+        struct mach_header_64 header = { MH_MAGIC_64, CPU_TYPE_ARM64, (cpu_subtype_t)subtypes[0], MH_DYLIB, 0, 0, 0, 0 };
+        memcpy(data, &header, sizeof header);
+        size = sizeof header;
+    } else {
+        struct fat_header header = { OSSwapHostToBigInt32(FAT_MAGIC), OSSwapHostToBigInt32((uint32_t)count) };
+        memcpy(data, &header, sizeof header);
+        for (size_t i = 0; i < count; i++) {
+            struct fat_arch arch = { (cpu_type_t)OSSwapHostToBigInt32((uint32_t)CPU_TYPE_ARM64),
+                                     (cpu_subtype_t)OSSwapHostToBigInt32(subtypes[i]), 0, 0, 0 };
+            memcpy(data + sizeof header + i * sizeof arch, &arch, sizeof arch);
+        }
+        size = sizeof data;
+    }
+    FILE *file = fopen(path, "wb");
+    if (!file) {
+        return false;
+    }
+    bool written = fwrite(data, 1, size, file) == size;
+    return fclose(file) == 0 && written;
+}
+
+// The loader skips tweaks with only the old arm64e ABI when the shim is
+// missing; it reads the ABI from the Mach-O header.
+static void test_old_abi(const char *loader, const char *scratch) {
+    // Without a tweak directory the loader's constructor loads nothing here.
+    unsetenv("BURROW_TEST_TWEAK_DIRECTORY");
+    void *handle = dlopen(loader, RTLD_NOW);
+    bool (*uses_old)(const char *) = handle ? (bool (*)(const char *))dlsym(handle, "burrow_loader_uses_old_arm64e_abi") : NULL;
+    checks++;
+    if (!uses_old) {
+        failures++;
+        fprintf(stderr, "[loader] cannot find burrow_loader_uses_old_arm64e_abi: %s\n", dlerror());
+        return;
+    }
+    struct {
+        const char *name;
+        bool fat;
+        uint32_t subtypes[2];
+        size_t count;
+        bool old;
+    } cases[] = {
+        { "thin old arm64e", false, { 2 }, 1, true },
+        { "thin new arm64e", false, { 0x80000002u }, 1, false },
+        { "thin arm64", false, { 0 }, 1, false },
+        { "fat arm64 and old arm64e", true, { 0, 2 }, 2, true },
+        { "fat old and new arm64e", true, { 2, 0x81000002u }, 2, false },
+        { "fat arm64 only", true, { 0 }, 1, false },
+    };
+    char path[PATH_MAX];
+    join(path, scratch, "header.dylib");
+    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        checks++;
+        if (!write_header(path, cases[i].fat, cases[i].subtypes, cases[i].count) || uses_old(path) != cases[i].old) {
+            failures++;
+            fprintf(stderr, "[loader] old ABI, %s: expected %s\n", cases[i].name, cases[i].old ? "old" : "not old");
+        }
+    }
+    unlink(path);
+}
+
+
 int main(int argc, char **argv) {
     if (argc != 2) {
         fprintf(stderr, "usage: %s <dir>\n", argv[0]);
         return 2;
     }
     const char *dir = argv[1];
-    char loader[PATH_MAX], tweaks[PATH_MAX], plain[PATH_MAX], app[PATH_MAX];
+    char loader[PATH_MAX], tweaks[PATH_MAX], plain[PATH_MAX], app[PATH_MAX], shim[PATH_MAX];
     if (!join(loader, dir, "BurrowLoaderTesting.dylib") || !join(tweaks, dir, "TweakInject") ||
-        !join(plain, dir, "loader-target") || !join(app, dir, APP_EXECUTABLE)) {
+        !join(plain, dir, "loader-target") || !join(app, dir, APP_EXECUTABLE) || !join(shim, dir, "OldABI.dylib")) {
         fprintf(stderr, "[loader] path too long\n");
         return 1;
     }
@@ -194,6 +266,7 @@ int main(int argc, char **argv) {
     join(settings, scratch, "loader.plist");
     setenv("BURROW_TEST_TWEAK_DIRECTORY", tweaks, 1);
     setenv("BURROW_TEST_LOADER_SETTINGS", settings, 1);
+    setenv("BURROW_TEST_OLD_ABI_SHIM", shim, 1);
 
     for (size_t i = 0; i < sizeof CASES / sizeof CASES[0]; i++) {
         const struct settings_case *test = &CASES[i];
@@ -202,22 +275,19 @@ int main(int argc, char **argv) {
             failures++;
             continue;
         }
-        char variable[64] = "";
+        // The target sets the variable itself before it opens the loader:
+        // Dopamine's spawn hook removes _MSSafeMode and _SafeMode from a new
+        // process's environment (and then injects nothing into it), so they
+        // would never reach the target on the device.
         if (test->environment) {
-            snprintf(variable, sizeof variable, "%s", test->environment);
-            char *equals = strchr(variable, '=');
-            if (equals) {
-                *equals = '\0';
-                setenv(variable, equals + 1, 1);
-            }
+            setenv("BURROW_TEST_SET_VARIABLE", test->environment, 1);
         }
         expect(test->name, "loader-target", plain, loader, test->plain);
         expect(test->name, "LoaderTarget.app", app, loader, test->app);
-        if (variable[0]) {
-            unsetenv(variable);
-        }
+        unsetenv("BURROW_TEST_SET_VARIABLE");
     }
     unlink(settings);
+    test_old_abi(loader, scratch);
     rmdir(scratch);
 
     if (failures) {

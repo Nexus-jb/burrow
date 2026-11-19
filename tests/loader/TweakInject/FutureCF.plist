@@ -9,6 +9,10 @@
 		<array>
 			<integer>100000</integer>
 		</array>
+		<key>Bundles</key>
+		<array>
+			<string>com.apple.CoreFoundation</string>
+		</array>
 	</dict>
 </dict>
 </plist>

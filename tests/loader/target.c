@@ -13,6 +13,7 @@
 #include <dlfcn.h>
 #include <objc/runtime.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static char loaded[4096];
@@ -38,6 +39,17 @@ int main(int argc, char **argv) {
     }
     objc_registerClassPair(plain);
 #endif
+    // NAME=VALUE for the target to set before it opens the loader.
+    const char *variable = getenv("BURROW_TEST_SET_VARIABLE");
+    if (variable) {
+        char name[64];
+        const char *equals = strchr(variable, '=');
+        if (equals && (size_t)(equals - variable) < sizeof name) {
+            memcpy(name, variable, (size_t)(equals - variable));
+            name[equals - variable] = '\0';
+            setenv(name, equals + 1, 1);
+        }
+    }
     if (!dlopen(argv[1], RTLD_NOW)) {
         fprintf(stderr, "%s\n", dlerror());
         return 4;

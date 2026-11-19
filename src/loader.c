@@ -4,23 +4,33 @@
 // from the tweak directory whose filter matches the process, unless the
 // user has turned that tweak off for the process.
 //
-// Filters follow the documented Cydia Substrate format: foo.plist beside
-// foo.dylib holds a dictionary whose Filter key lists the bundles, classes,
-// executables and CoreFoundation versions the tweak is meant for. A tweak
-// without a filter is not loaded. A tweak whose property list sets
+// Filters use the Cydia Substrate format: foo.plist beside foo.dylib holds
+// a dictionary whose Filter key lists the bundles, classes, executables and
+// CoreFoundation versions the tweak is meant for. They are combined the way
+// ElleKit combines them, since rootless tweaks are made and tested with
+// it. A tweak without a filter is not loaded. A tweak whose property list sets
 // IsTweakManager, such as one that turns tweaks off per app, is loaded
 // before every other tweak, and only when another tweak is loaded too.
+// Like ElleKit's loader, this one opens the old arm64e ABI shim, when it is
+// installed, after the tweak managers and before the other tweaks: tweaks
+// built with the arm64e ABI from before iOS 14 crash without it. Without the
+// shim, it skips such tweaks in arm64e processes.
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <dirent.h>
 #include <dlfcn.h>
+#include <libkern/OSByteOrder.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <mach-o/dyld.h>
+#include <mach-o/fat.h>
+#include <mach-o/loader.h>
 #include <objc/runtime.h>
 #include <os/log.h>
+#include <pthread.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -131,23 +141,22 @@ static CFPropertyListRef read_property_list(const char *path, int *error) {
 
 static bool core_foundation_matches(CFArrayRef bounds, struct process *process) {
     (void)process;
-    // One or two numbers: the version must be at least the first and, when
-    // there is a second, below it.
+    // As ElleKit's loader treats the key, so that switching loaders changes
+    // nothing about which tweaks load. One number: the version must be at
+    // least that number. Two numbers, the first a number: ElleKit's loader
+    // never loads the tweak, so no tweak with such a filter has run under
+    // it; Burrow's loader does not load it either. Anything else sets no
+    // condition.
     CFIndex count = CFArrayGetCount(bounds);
-    if (count == 0) {
-        return false;
+    if (count != 1 && count != 2) {
+        return true;
     }
-    for (CFIndex i = 0; i < count && i < 2; i++) {
-        CFTypeRef item = CFArrayGetValueAtIndex(bounds, i);
-        double bound;
-        if (!has_type(item, CFNumberGetTypeID()) || !CFNumberGetValue((CFNumberRef)item, kCFNumberDoubleType, &bound)) {
-            return false;
-        }
-        if (i == 0 ? kCFCoreFoundationVersionNumber < bound : kCFCoreFoundationVersionNumber >= bound) {
-            return false;
-        }
+    CFTypeRef first = CFArrayGetValueAtIndex(bounds, 0);
+    double bound;
+    if (!has_type(first, CFNumberGetTypeID()) || !CFNumberGetValue((CFNumberRef)first, kCFNumberDoubleType, &bound)) {
+        return true;
     }
-    return true;
+    return count == 1 && kCFCoreFoundationVersionNumber >= bound;
 }
 
 static bool executables_match(CFArrayRef executables, struct process *process) {
@@ -282,7 +291,7 @@ static bool core_foundation_came_first(void) {
     return false;
 }
 
-static bool bundle_loaded(CFStringRef identifier, struct process *process) {
+static bool bundle_loaded_exactly(CFStringRef identifier, struct process *process) {
     if (process->bundle_identifier && CFEqual(identifier, process->bundle_identifier)) {
         return true;
     }
@@ -293,6 +302,22 @@ static bool bundle_loaded(CFStringRef identifier, struct process *process) {
         process->loaded_bundles = read_loaded_bundles();
     }
     return process->loaded_bundles && CFSetContainsValue(process->loaded_bundles, identifier);
+}
+
+// As in ElleKit, an identifier also matches in lower case, so a filter
+// for com.apple.SpringBoard finds com.apple.springboard.
+static bool bundle_loaded(CFStringRef identifier, struct process *process) {
+    if (bundle_loaded_exactly(identifier, process)) {
+        return true;
+    }
+    CFMutableStringRef lower = CFStringCreateMutableCopy(kCFAllocatorDefault, 0, identifier);
+    if (!lower) {
+        return false;
+    }
+    CFStringLowercase(lower, NULL);
+    bool found = !CFEqual(lower, identifier) && bundle_loaded_exactly(lower, process);
+    CFRelease(lower);
+    return found;
 }
 
 // A bundle matches when it is loaded in the process: the app itself or any
@@ -308,38 +333,31 @@ static bool bundles_match(CFArrayRef bundles, struct process *process) {
     return false;
 }
 
-// By default every kind of filter present must match. With Mode set to
-// "Any", one matching kind is enough. A filter with none of these kinds
-// matches nothing.
+// The keys combine as in ElleKit: CoreFoundationVersion, when present,
+// must match; then any one of Executables, Classes and Bundles is enough.
+// Mode is accepted and changes nothing, since one key is always enough. A
+// filter with none of those three keys matches nothing.
 static bool filter_matches(CFDictionaryRef filter, struct process *process) {
+    CFTypeRef versions = CFDictionaryGetValue(filter, CFSTR("CoreFoundationVersion"));
+    if (versions && !(is_array(versions) && core_foundation_matches((CFArrayRef)versions, process))) {
+        return false;
+    }
     const struct {
         CFStringRef key;
         bool (*matches)(CFArrayRef, struct process *);
     } kinds[] = {
         // The cheapest checks first.
-        { CFSTR("CoreFoundationVersion"), core_foundation_matches },
         { CFSTR("Executables"), executables_match },
         { CFSTR("Classes"), classes_match },
         { CFSTR("Bundles"), bundles_match },
     };
-    CFTypeRef mode = CFDictionaryGetValue(filter, CFSTR("Mode"));
-    bool any = is_string(mode) && CFEqual(mode, CFSTR("Any"));
-    bool present = false;
     for (size_t i = 0; i < sizeof kinds / sizeof kinds[0]; i++) {
         CFTypeRef value = CFDictionaryGetValue(filter, kinds[i].key);
-        if (!value) {
-            continue;
-        }
-        present = true;
-        bool matched = is_array(value) && kinds[i].matches((CFArrayRef)value, process);
-        if (any && matched) {
+        if (value && is_array(value) && kinds[i].matches((CFArrayRef)value, process)) {
             return true;
         }
-        if (!any && !matched) {
-            return false;
-        }
     }
-    return present && !any;
+    return false;
 }
 
 static bool tweak_matches(const char *filter_path, const char *name, struct process *process, bool *manager) {
@@ -548,13 +566,104 @@ static bool should_load(const char *directory, const char *name, CFDictionaryRef
     return length > 0 && (size_t)length < sizeof path && tweak_matches(path, name, process, manager);
 }
 
-static void open_tweak(const char *directory, const char *name) {
+// cpusubtype of an arm64e slice: the subtype in the low byte and, from the
+// iOS 14 ABI on, a flag for its versioned pointer authentication.
+enum {
+    SUBTYPE_ARM64E = 2,
+    SUBTYPE_PTRAUTH_ABI = (int)0x80000000,
+};
+
+#if defined(__arm64e__) || defined(BURROW_LOADER_TESTING)
+// Whether a library's arm64e code uses only the ABI from before iOS 14. A
+// library with a slice for each ABI loads the new one.
+static bool uses_old_arm64e_abi(const char *path) {
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        return false;
+    }
+    uint8_t head[4096];
+    ssize_t got = read(fd, head, sizeof head);
+    close(fd);
+    if (got < (ssize_t)sizeof(struct mach_header_64)) {
+        return false;
+    }
+    uint32_t magic;
+    memcpy(&magic, head, sizeof magic);
+    if (magic == MH_MAGIC_64) {
+        struct mach_header_64 header;
+        memcpy(&header, head, sizeof header);
+        return header.cputype == CPU_TYPE_ARM64 && (header.cpusubtype & 0xff) == SUBTYPE_ARM64E &&
+               !(header.cpusubtype & SUBTYPE_PTRAUTH_ABI);
+    }
+    // Fat headers are big-endian; both entry layouts start with the CPU type
+    // and subtype.
+    magic = OSSwapBigToHostInt32(magic);
+    if (magic != FAT_MAGIC && magic != FAT_MAGIC_64) {
+        return false;
+    }
+    struct fat_header fat;
+    memcpy(&fat, head, sizeof fat);
+    uint32_t count = OSSwapBigToHostInt32(fat.nfat_arch);
+    size_t entry = magic == FAT_MAGIC ? sizeof(struct fat_arch) : sizeof(struct fat_arch_64);
+    bool old = false;
+    for (uint32_t i = 0; i < count && sizeof fat + (i + 1) * entry <= (size_t)got; i++) {
+        uint32_t words[2];
+        memcpy(words, head + sizeof fat + i * entry, sizeof words);
+        uint32_t type = OSSwapBigToHostInt32(words[0]), subtype = OSSwapBigToHostInt32(words[1]);
+        if (type != (uint32_t)CPU_TYPE_ARM64 || (subtype & 0xff) != SUBTYPE_ARM64E) {
+            continue;
+        }
+        if (subtype & (uint32_t)SUBTYPE_PTRAUTH_ABI) {
+            return false;
+        }
+        old = true;
+    }
+    return old;
+}
+#endif
+
+#ifdef BURROW_LOADER_TESTING
+// Test builds only: lets the loader tests check the ABI reading.
+__attribute__((visibility("default"))) bool burrow_loader_uses_old_arm64e_abi(const char *path);
+bool burrow_loader_uses_old_arm64e_abi(const char *path) {
+    return uses_old_arm64e_abi(path);
+}
+#endif
+
+static void open_tweak(const char *directory, const char *name, bool old_abi_shim_loaded) {
     char path[PATH_MAX];
     int length = snprintf(path, sizeof path, "%s/%s%s", directory, name, TWEAK_SUFFIX);
     if (length < 0 || (size_t)length >= sizeof path) {
         return;
     }
-    if (dlopen(path, RTLD_LAZY | RTLD_GLOBAL)) {
+#if defined(__arm64e__)
+    // Without the shim, such a tweak crashes this process in the Objective-C
+    // runtime while it loads; skipping it keeps the process running.
+    if (!old_abi_shim_loaded && uses_old_arm64e_abi(path)) {
+        os_log_error(OS_LOG_DEFAULT,
+                     "Burrow: %{public}s is built with the old arm64e ABI and the OldABI shim is not installed, "
+                     "so it is not loaded",
+                     name);
+        return;
+    }
+#else
+    (void)old_abi_shim_loaded;
+#endif
+    // Crash reports name each thread but list only the images on the
+    // threads' stacks. Naming the thread after the tweak while it opens
+    // names the tweak in a crash in dyld or the Objective-C runtime, before
+    // any of its code runs. (Messages in a library's __crash_info section
+    // would not do: the crash reporter of macOS 14 and later leaves out
+    // those of libraries outside the shared cache.)
+    char previous[64] = "";
+    pthread_getname_np(pthread_self(), previous, sizeof previous);
+    char loading[64];
+    snprintf(loading, sizeof loading, "Burrow: loading %s", name);
+    pthread_setname_np(loading);
+    // The same mode as ElleKit's loader, which tweaks are tested with.
+    void *handle = dlopen(path, RTLD_LAZY);
+    pthread_setname_np(previous);
+    if (handle) {
         os_log_info(OS_LOG_DEFAULT, "Burrow: loaded %{public}s", name);
     } else {
         const char *reason = dlerror();
@@ -570,7 +679,7 @@ static void free_names(char **names, size_t count) {
     free(names);
 }
 
-static void load_tweaks(const char *directory, const char *settings_path) {
+static void load_tweaks(const char *directory, const char *settings_path, const char *old_abi_shim) {
     char **names;
     size_t count = list_tweaks(directory, &names);
     struct process process;
@@ -595,11 +704,21 @@ static void load_tweaks(const char *directory, const char *settings_path) {
                 others = others || !manager;
             }
         }
-        // Tweak managers first, and only for the sake of other tweaks.
+        // Tweak managers first, and only for the sake of other tweaks; then
+        // the old ABI shim; then the other tweaks.
+        bool shim_loaded = false;
         for (int pass = LOAD_FIRST; plan && others && pass >= LOAD; pass--) {
+            if (pass == LOAD && old_abi_shim && access(old_abi_shim, F_OK) == 0) {
+                shim_loaded = dlopen(old_abi_shim, RTLD_LAZY) != NULL;
+                if (!shim_loaded) {
+                    const char *reason = dlerror();
+                    os_log_error(OS_LOG_DEFAULT, "Burrow: the old ABI shim cannot be loaded: %{public}s",
+                                 reason ? reason : "unknown error");
+                }
+            }
             for (size_t i = 0; i < count; i++) {
                 if (plan[i] == pass) {
-                    open_tweak(directory, names[i]);
+                    open_tweak(directory, names[i], shim_loaded);
                 }
             }
         }
@@ -632,12 +751,15 @@ __attribute__((constructor)) static void burrow_loader_start(void) {
     // Test builds only: the loader tests choose both paths.
     const char *directory = getenv("BURROW_TEST_TWEAK_DIRECTORY");
     const char *settings = getenv("BURROW_TEST_LOADER_SETTINGS");
+    const char *old_abi_shim = getenv("BURROW_TEST_OLD_ABI_SHIM");
     if (!directory || !settings) {
         return;
     }
 #else
     const char *directory = BURROW_JBROOT "/usr/lib/TweakInject";
     const char *settings = BURROW_JBROOT "/etc/burrow/loader.plist";
+    // Where ElleKit's loader looks for it.
+    const char *old_abi_shim = BURROW_JBROOT "/usr/lib/ellekit/OldABI.dylib";
 #endif
-    load_tweaks(directory, settings);
+    load_tweaks(directory, settings, old_abi_shim);
 }

@@ -1,0 +1,89 @@
+{"app_name":"SpringBoard","timestamp":"2026-11-17 21:03:00.00 -0500","bug_type":"309","os_version":"iPhone OS 16.3.1 (20D67)","name":"SpringBoard","incident_id":"22222222-0000-0000-0000-000000000004","slice_uuid":"00000000-0000-0000-0000-000000000120","bundleID":"com.apple.springboard"}
+{
+  "procName": "SpringBoard",
+  "procPath": "/System/Library/CoreServices/SpringBoard.app/SpringBoard",
+  "captureTime": "2026-11-17 21:03:00.0000 -0500",
+  "exception": {
+    "type": "EXC_BAD_ACCESS",
+    "signal": "SIGBUS",
+    "subtype": "UNKNOWN_0x105 at 0x00000000dac11a30"
+  },
+  "faultingThread": 0,
+  "threads": [
+    {
+      "triggered": true,
+      "name": "Burrow: loading Gamma",
+      "frames": [
+        {
+          "imageOffset": 4096,
+          "imageIndex": 1,
+          "symbol": "readClass(objc_class*, bool, bool)",
+          "symbolLocation": 92
+        },
+        {
+          "imageOffset": 8192,
+          "imageIndex": 1,
+          "symbol": "map_images_nolock",
+          "symbolLocation": 1200
+        },
+        {
+          "imageOffset": 2048,
+          "imageIndex": 2,
+          "symbol": "dyld4::APIs::dlopen_from(char const*, int, void*)",
+          "symbolLocation": 8
+        },
+        {
+          "imageOffset": 2596,
+          "imageIndex": 3,
+          "symbol": "burrow_loader_start",
+          "symbolLocation": 2596
+        },
+        {
+          "imageOffset": 16,
+          "imageIndex": 0
+        }
+      ]
+    }
+  ],
+  "usedImages": [
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4302864320,
+      "size": 65536,
+      "uuid": "00000000-0000-0000-0000-000000000120",
+      "path": "/System/Library/CoreServices/SpringBoard.app/SpringBoard",
+      "name": "SpringBoard"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4302929856,
+      "size": 65536,
+      "uuid": "00000000-0000-0000-0000-000000000121",
+      "path": "/usr/lib/libobjc.A.dylib",
+      "name": "libobjc.A.dylib"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4302995392,
+      "size": 65536,
+      "uuid": "00000000-0000-0000-0000-000000000122",
+      "path": "/usr/lib/dyld",
+      "name": "dyld"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4303060928,
+      "size": 65536,
+      "uuid": "00000000-0000-0000-0000-000000000123",
+      "path": "/private/preboot/0A1B2C/dopamine-XYZ/procursus/usr/lib/burrow/BurrowLoader.dylib",
+      "name": "BurrowLoader.dylib"
+    }
+  ],
+  "bundleInfo": {
+    "CFBundleIdentifier": "com.apple.springboard"
+  }
+}

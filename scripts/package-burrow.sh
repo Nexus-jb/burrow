@@ -81,8 +81,9 @@ Author: Nexus-jb
 Homepage: https://github.com/Nexus-jb/burrow
 Description: Tweak injection platform (development build)
  This development build keeps a crash log of every crash with tweaks
- loaded and names the tweak to blame. It does not load tweaks yet: the
- jailbreak's own tweak loader keeps doing that. Run burrowctl status.
+ loaded and names the tweak to blame. The jailbreak's own tweak loader
+ keeps loading tweaks until "burrowctl loader burrow" switches to Burrow's,
+ and "burrowctl loader ellekit" switches back. Run burrowctl status.
 CONTROL
 
 cat > "$stage/DEBIAN/postinst" <<'SCRIPT'
@@ -98,10 +99,31 @@ SCRIPT
 cat > "$stage/DEBIAN/prerm" <<'SCRIPT'
 #!/var/jb/bin/sh
 # SPDX-License-Identifier: Apache-2.0
+# Removing Burrow gives the tweak loader back to ElleKit first.
+if [ "$1" = remove ] || [ "$1" = deconfigure ]; then
+    /var/jb/usr/bin/burrowctl loader ellekit >/dev/null 2>&1 || true
+fi
 launchctl unload /var/jb/Library/LaunchDaemons/com.nexusjb.burrowd.plist >/dev/null 2>&1 || true
 exit 0
 SCRIPT
-chmod 0755 "$stage/DEBIAN/postinst" "$stage/DEBIAN/prerm"
+cat > "$stage/DEBIAN/postrm" <<'SCRIPT'
+#!/var/jb/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+# In case burrowctl could not run: no link to a removed loader is left.
+if [ "$1" = remove ] || [ "$1" = purge ]; then
+    loader=/var/jb/usr/lib/TweakLoader.dylib
+    if [ -L "$loader" ] && [ "$(readlink "$loader")" = /var/jb/usr/lib/burrow/BurrowLoader.dylib ]; then
+        rm -f "$loader"
+    fi
+    dpkg-divert --package com.nexusjb.burrow --rename --divert /var/jb/usr/lib/TweakLoader.ellekit.dylib \
+        --remove "$loader" >/dev/null 2>&1 || true
+fi
+if [ "$1" = purge ]; then
+    rm -rf /var/jb/var/lib/burrow
+fi
+exit 0
+SCRIPT
+chmod 0755 "$stage/DEBIAN/postinst" "$stage/DEBIAN/prerm" "$stage/DEBIAN/postrm"
 
 mkdir -p "$out"
 deb="$out/${package}_${version}_${architecture}.deb"

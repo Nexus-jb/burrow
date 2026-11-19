@@ -76,11 +76,14 @@ static NSUUID *uuid_value(NSDictionary *dictionary, NSString *key) {
 @property (nonatomic, readwrite, copy, nullable) NSDate *date;
 @property (nonatomic, readwrite, copy, nullable) NSString *exceptionType;
 @property (nonatomic, readwrite, copy, nullable) NSString *signalName;
+@property (nonatomic, readwrite, copy, nullable) NSString *exceptionSubtype;
 @property (nonatomic, readwrite, copy, nullable) NSString *uncaughtExceptionName;
 @property (nonatomic, readwrite, copy, nullable) NSString *uncaughtExceptionReason;
 @property (nonatomic, readwrite, copy) NSArray<BurrowCrashFrame *> *crashedThreadFrames;
 @property (nonatomic, readwrite, copy) NSArray<BurrowCrashFrame *> *lastExceptionFrames;
 @property (nonatomic, readwrite, copy) NSArray<BurrowCrashImage *> *images;
+@property (nonatomic, copy, nullable) NSString *crashedThreadName;
+@property (nonatomic, copy, nullable) NSString *burrowLoadingTweak;
 @end
 
 @implementation BurrowCrashReport
@@ -157,6 +160,7 @@ static NSUUID *uuid_value(NSDictionary *dictionary, NSString *key) {
     NSDictionary *exception = typed(body[@"exception"], [NSDictionary class]);
     report.exceptionType = string_value(exception, @"type");
     report.signalName = string_value(exception, @"signal");
+    report.exceptionSubtype = string_value(exception, @"subtype");
     // Newer reports describe an uncaught exception in exceptionReason;
     // older ones only in the application specific information.
     NSDictionary *reason = typed(body[@"exceptionReason"], [NSDictionary class]);
@@ -190,6 +194,11 @@ static NSUUID *uuid_value(NSDictionary *dictionary, NSString *key) {
         }
     }
     report.crashedThreadFrames = [report framesFrom:typed(crashed[@"frames"], [NSArray class])];
+    report.crashedThreadName = string_value(crashed, @"name");
+    static NSString *const loading = @"Burrow: loading ";
+    if ([report.crashedThreadName hasPrefix:loading] && report.crashedThreadName.length > loading.length) {
+        report.burrowLoadingTweak = [report.crashedThreadName substringFromIndex:loading.length];
+    }
     report.lastExceptionFrames = [report framesFrom:typed(body[@"lastExceptionBacktrace"], [NSArray class])];
     return report;
 }

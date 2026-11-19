@@ -27,12 +27,30 @@ JSON header line and a JSON body. Safe Mode reads:
   reason when the report has them (reports from iOS 16 do not);
 - the crashed thread's frames and, for an uncaught Objective-C exception,
   the backtrace where it was thrown;
-- every loaded image's path and UUID.
+- the path and UUID of each image on the threads' stacks. Reports list only
+  those images, not everything the process loaded;
+- the name of the crashed thread, which says when Burrow's loader was
+  opening a tweak (below).
 
 Reports hide parts of some paths, such as `/Users/USER/*/Foo.dylib`, so
 Safe Mode recognizes tweaks by UUID: it reads the UUIDs of every tweak in
 the tweak directory and matches them against the report's images. A path
 inside the tweak directory is a second way to recognize one.
+
+## What Burrow's loader leaves in a report
+
+While Burrow's loader opens a tweak, it names the thread
+`Burrow: loading <tweak>`, and reports keep the name of every thread. A
+crash in dyld or the Objective-C runtime while a tweak was opened, before
+any of its code ran, therefore names that tweak, though no tweak is on a
+stack. Such a crash is how a tweak built with the old arm64e ABI fails
+without the shim (see [loader.md](loader.md)). Thread names are cut at 63
+bytes; a cut name is completed from the tweak directory when only one tweak
+starts with it.
+
+A message in a library's `__DATA,__crash_info` section would not do: the
+crash reporter of macOS 14 and later leaves out the messages of libraries
+outside the shared cache, as the tests showed on macOS 15.
 
 ## Who is to blame
 
@@ -42,6 +60,8 @@ of an uncaught exception, then in the crashed thread:
 - The first tweak found is to blame.
 - If the process's own code comes first (its main executable, or an app in
   the app container), the crash is the app's own, and no tweak is blamed.
+- Without a tweak on the stacks, a crash on the thread where Burrow's loader
+  was opening a tweak is blamed on that tweak, and its reason says so.
 - Frames from the system, from Burrow and from other libraries of the
   jailbreak are passed over, but at most 12 of them. A tweak further from
   the crash is not blamed: a tweak that hooks a busy method appears in many
@@ -75,7 +95,15 @@ turned off every tweak in backboardd: crashed 3 times within 120 seconds, and no
 ```
 
 The events are for the package manager to show, next to a way to turn the
-tweak back on. The last 100 events are kept.
+tweak back on. Until it does, `burrowctl enable TWEAK [PROCESS]` turns a
+tweak back on, in one process as Safe Mode named it or in every process,
+and records that as an event too:
+
+```
+turned Foo back on in com.apple.springboard with burrowctl enable
+```
+
+The last 100 events are kept.
 
 Safe Mode changes the loader settings under an exclusive lock on
 `<settings>.lock`, and anything else that writes them must take the same
@@ -126,6 +154,26 @@ burrowctl status       the tweak loader and hooking engine in use, burrowd,
                        the reports it has read, the crash log and Safe Mode
 burrowctl crashes [N]  the N newest crashes with tweaks loaded (10)
 burrowctl events       what Safe Mode turned off, and why
+burrowctl enable TWEAK [PROCESS]
+                       turn a tweak Safe Mode turned off back on, in
+                       PROCESS or everywhere (root only)
+burrowctl why NAME     the newest crash report of the process NAME, among
+                       the system's and the crash log's copies (or a
+                       report file): the exception, the tweaks found, the
+                       one to blame, the tweak Burrow's loader was opening,
+                       the images on the stacks that are not Apple's, and
+                       the crashed thread
+burrowctl loaded NAME  the tweak loader, hooking engine and tweaks in the
+                       running process NAME. Burrow's loader is not mapped
+                       once the jailbreak closes it; a process started after
+                       the switch is shown as loaded by it
+burrowctl check        the tweaks and the libraries they load that use the
+                       old arm64e ABI, whether ElleKit's OldABI shim is
+                       installed, the tweaks with a CoreFoundationVersion
+                       range, and the tweak managers
+burrowctl loader burrow|ellekit
+                       which loader /var/jb/usr/lib/TweakLoader.dylib is
+                       (root only)
 ```
 
 The state lives in `/var/jb/var/lib/burrow`: `crashes/` for the crash log,

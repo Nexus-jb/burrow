@@ -12,6 +12,7 @@ NSString *const BurrowSafeModeEventProcess = @"Process";
 NSString *const BurrowSafeModeEventTweak = @"Tweak";
 NSString *const BurrowSafeModeEventReason = @"Reason";
 NSString *const BurrowSafeModeEventReport = @"Report";
+NSString *const BurrowSafeModeEventAction = @"Action";
 
 static NSString *const BurrowSafeModeErrorDomain = @"BurrowSafeMode";
 static NSString *const AllTweaks = @"*";
@@ -325,9 +326,58 @@ static void keep_last(NSMutableArray *list, NSUInteger count) {
     return [self write:state to:_statePath error:error];
 }
 
+- (NSArray<NSString *> *)turnOnTweak:(NSString *)tweak inProcess:(NSString *)process error:(NSError **)error {
+    int lock = [self lock:error];
+    if (lock < 0) {
+        return nil;
+    }
+    NSMutableArray<NSString *> *changed = nil;
+    NSMutableDictionary *settings = [self readSettings:error];
+    if (settings) {
+        changed = [NSMutableArray array];
+        NSMutableDictionary *processes = typed(settings[@"DisabledInProcesses"], [NSMutableDictionary class]);
+        for (NSString *name in [processes.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
+            NSMutableArray *list = processes[name];
+            if ((process && ![name isEqualToString:process]) || ![list containsObject:tweak]) {
+                continue;
+            }
+            [list removeObject:tweak];
+            if (!list.count) {
+                [processes removeObjectForKey:name];
+            }
+            [changed addObject:name];
+        }
+        if (changed.count) {
+            if ([self write:settings to:_settingsPath error:error]) {
+                NSMutableDictionary *state = [self readState];
+                for (NSString *name in changed) {
+                    [state[@"Events"] addObject:@{
+                        BurrowSafeModeEventDate : [NSDate date],
+                        BurrowSafeModeEventProcess : name,
+                        BurrowSafeModeEventTweak : tweak,
+                        BurrowSafeModeEventReason : @"with burrowctl enable",
+                        BurrowSafeModeEventAction : @"on",
+                    }];
+                }
+                keep_last(state[@"Events"], KeptEvents);
+                // The settings changed; the event is only a record.
+                [self write:state to:_statePath error:NULL];
+            } else {
+                changed = nil;
+            }
+        }
+    }
+    close(lock);
+    return changed;
+}
+
 + (NSString *)describeEvent:(NSDictionary *)event {
     NSString *tweak = event[BurrowSafeModeEventTweak];
     NSString *what = [tweak isEqual:AllTweaks] ? @"every tweak" : tweak;
+    if ([event[BurrowSafeModeEventAction] isEqual:@"on"]) {
+        return [NSString stringWithFormat:@"turned %@ back on in %@ %@", what, event[BurrowSafeModeEventProcess],
+                                          event[BurrowSafeModeEventReason]];
+    }
     return [NSString stringWithFormat:@"turned off %@ in %@: %@", what, event[BurrowSafeModeEventProcess],
                                       event[BurrowSafeModeEventReason]];
 }

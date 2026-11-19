@@ -42,13 +42,21 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly, copy, nullable) NSDate *date;
 @property (nonatomic, readonly, copy, nullable) NSString *exceptionType;
 @property (nonatomic, readonly, copy, nullable) NSString *signalName;
+// Such as "KERN_INVALID_ADDRESS at 0x0000000000000010".
+@property (nonatomic, readonly, copy, nullable) NSString *exceptionSubtype;
 // The uncaught exception's name and reason, when the crash was one.
 @property (nonatomic, readonly, copy, nullable) NSString *uncaughtExceptionName;
 @property (nonatomic, readonly, copy, nullable) NSString *uncaughtExceptionReason;
 @property (nonatomic, readonly, copy) NSArray<BurrowCrashFrame *> *crashedThreadFrames;
 // Where an uncaught exception was thrown; empty for other crashes.
 @property (nonatomic, readonly, copy) NSArray<BurrowCrashFrame *> *lastExceptionFrames;
+// The images on the threads' stacks. Reports list only those, not every
+// image loaded.
 @property (nonatomic, readonly, copy) NSArray<BurrowCrashImage *> *images;
+@property (nonatomic, readonly, copy, nullable) NSString *crashedThreadName;
+// The tweak Burrow's loader was opening on the crashed thread, which it
+// names "Burrow: loading <tweak>" meanwhile; nil otherwise.
+@property (nonatomic, readonly, copy, nullable) NSString *burrowLoadingTweak;
 
 @end
 
