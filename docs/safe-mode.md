@@ -152,7 +152,9 @@ burrowctl why NAME     the newest crash report of the process NAME (or a
                        the images on the stacks that are not Apple's, and
                        the crashed thread
 burrowctl loaded NAME  the tweak loader, hooking engine and tweaks in the
-                       running process NAME
+                       running process NAME. Burrow's loader is not mapped
+                       once the jailbreak closes it; a process started after
+                       the switch is shown as loaded by it
 burrowctl check        the tweaks and the libraries they load that use the
                        old arm64e ABI, whether ElleKit's OldABI shim is
                        installed, the tweaks with a CoreFoundationVersion

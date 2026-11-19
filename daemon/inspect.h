@@ -13,6 +13,9 @@ NSArray<NSNumber *> *BurrowProcessesNamed(NSString *name);
 // read (reading another user's process needs root).
 NSArray<NSString *> *_Nullable BurrowMappedFiles(pid_t pid);
 
+// When the process started, or nil if it cannot be read.
+NSDate *_Nullable BurrowProcessStartDate(pid_t pid);
+
 // The arm64e ABI of a Mach-O file's arm64e slice: "new" for the ABI of
 // iOS 14 and later, "old" for the one before, or nil without an arm64e
 // slice.

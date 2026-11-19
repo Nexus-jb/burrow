@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <stddef.h>
 #include <string.h>
+#include <sys/sysctl.h>
 #include <unistd.h>
 #include <sys/param.h>
 #include <sys/sysctl.h>
@@ -140,6 +141,17 @@ NSArray<NSString *> *BurrowMappedFiles(pid_t pid) {
         address = next;
     }
     return any ? paths.array : nil;
+}
+
+NSDate *BurrowProcessStartDate(pid_t pid) {
+    int name[] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
+    struct kinfo_proc info;
+    size_t size = sizeof info;
+    if (sysctl(name, 4, &info, &size, NULL, 0) != 0 || size < sizeof info || info.kp_proc.p_pid != pid) {
+        return nil;
+    }
+    struct timeval start = info.kp_proc.p_starttime;
+    return [NSDate dateWithTimeIntervalSince1970:(double)start.tv_sec + (double)start.tv_usec / 1e6];
 }
 
 // cpusubtype values of an arm64e slice: the subtype in the low byte, and

@@ -148,8 +148,16 @@ static int loaded(NSString *name) {
         }
         [tweaks sortUsingSelector:@selector(compare:)];
         print([NSString stringWithFormat:@"%@ (pid %@)", name, pid]);
-        print([NSString stringWithFormat:@"  loader: %@", owner_of_mapped(files, @[ @"/burrow/BurrowLoader.dylib" ],
-                                                                          @[ @"/ellekit/libinjector.dylib" ])]);
+        NSString *loader = owner_of_mapped(files, @[ @"/burrow/BurrowLoader.dylib" ], @[ @"/ellekit/libinjector.dylib" ]);
+        // Burrow's loader is closed once it has loaded the tweaks, so it is
+        // not mapped; a process that started after the switch got it.
+        NSDate *since = BurrowLoaderActiveSince();
+        NSDate *started = BurrowProcessStartDate(pid.intValue);
+        if ([loader isEqualToString:@"none"] && [BurrowOwnerOfFile(BurrowSystemLoaderPath) isEqualToString:@"Burrow"] &&
+            since && started && [started compare:since] != NSOrderedAscending) {
+            loader = @"Burrow (it loaded the tweaks, then the jailbreak closed it)";
+        }
+        print([NSString stringWithFormat:@"  loader: %@", loader]);
         print([NSString stringWithFormat:@"  engine: %@",
                                          owner_of_mapped(files, @[ @"/burrow/CydiaSubstrate.framework/CydiaSubstrate" ],
                                                          @[ @"/libellekit.dylib" ])]);
