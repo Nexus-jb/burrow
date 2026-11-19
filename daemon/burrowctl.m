@@ -188,6 +188,22 @@ static int loaded(NSString *name) {
                                                          @[ @"/libellekit.dylib" ])]);
         print([NSString stringWithFormat:@"  tweaks (%lu): %@", (unsigned long)tweaks.count,
                                          tweaks.count ? [tweaks componentsJoinedByString:@", "] : @"none"]);
+        // The jailbreak's other files in the process, under /var/jb.
+        NSString *root = [@"/var/jb" stringByResolvingSymlinksInPath];
+        NSMutableArray<NSString *> *others = [NSMutableArray array];
+        for (NSString *file in files) {
+            if ([file containsString:@"/TweakInject/"]) {
+                continue;
+            }
+            for (NSString *prefix in @[ [root stringByAppendingString:@"/"], @"/var/jb/" ]) {
+                if ([file hasPrefix:prefix]) {
+                    [others addObject:[@"/var/jb/" stringByAppendingString:[file substringFromIndex:prefix.length]]];
+                    break;
+                }
+            }
+        }
+        print([NSString stringWithFormat:@"  other jailbreak files (%lu): %@", (unsigned long)others.count,
+                                         others.count ? [others componentsJoinedByString:@", "] : @"none"]);
     }
     return status;
 }
