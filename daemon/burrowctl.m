@@ -341,6 +341,11 @@ static int loader(NSString *which) {
     BurrowSwitch *system_switch = [BurrowSwitch systemSwitch];
     NSError *error = nil;
     if ([which isEqualToString:@"burrow"]) {
+        // Installing the package restarts burrowd, which takes a moment;
+        // a switch typed right after the install waits for it.
+        for (int tries = 0; !BurrowDaemonPID() && tries < 20; tries++) {
+            usleep(500000);
+        }
         if (!BurrowDaemonPID()) {
             print(@"burrowd is not running, and the guard needs it. Reinstall the Burrow package first.");
             return 1;
