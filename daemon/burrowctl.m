@@ -11,8 +11,10 @@
 //   burrowctl enable TWEAK [PROCESS]
 //                             turn a tweak Safe Mode turned off back on, in
 //                             PROCESS as Safe Mode named it or everywhere
-//   burrowctl check           the tweaks and libraries that need the old arm64e
-//                             ABI shim and
+//   burrowctl check           the hooking engine's symbols the tweaks use, and
+//                             whether Burrow's engine has them; the tweaks
+//                             and libraries that need the old arm64e ABI shim
+//                             and
 //                             whether it is installed, the tweaks no loader
 //                             loads for their version range, and the tweak
 //                             managers
@@ -31,6 +33,7 @@
 #import "state.h"
 #import "switch.h"
 
+#include <dlfcn.h>
 #include <unistd.h>
 
 static NSString *format_date(id date) {
@@ -282,6 +285,11 @@ static int check(BurrowServicePaths *paths) {
     NSMutableArray<NSString *> *ranges = [NSMutableArray array];
     NSMutableArray<NSString *> *managers = [NSMutableArray array];
     NSMutableDictionary<NSString *, NSArray<NSString *> *> *oldLibraries = [NSMutableDictionary dictionary];
+    // What the tweaks, and the libraries they load, take from the hooking
+    // engine: each symbol and the tweaks that need it.
+    NSArray<NSString *> *engineNames =
+        @[ @"CydiaSubstrate", @"libsubstrate.dylib", @"libhooker.dylib", @"libblackjack.dylib", @"libellekit.dylib" ];
+    NSMutableDictionary<NSString *, NSMutableOrderedSet<NSString *> *> *engineSymbols = [NSMutableDictionary dictionary];
     NSUInteger count = 0;
     for (NSString *name in [[files contentsOfDirectoryAtPath:directory error:NULL]
              sortedArrayUsingSelector:@selector(compare:)]) {
@@ -294,7 +302,22 @@ static int check(BurrowServicePaths *paths) {
         if ([BurrowArm64eABI(tweakPath) isEqualToString:@"old"]) {
             [old addObject:tweak];
         }
-        for (NSString *library in BurrowJailbreakLibraries(tweakPath, paths.jailbreakRoots)) {
+        NSArray<NSString *> *libraries = BurrowJailbreakLibraries(tweakPath, paths.jailbreakRoots);
+        for (NSString *file in [@[ tweakPath ] arrayByAddingObjectsFromArray:libraries]) {
+            // The engine's own files do not count.
+            if ([engineNames containsObject:file.stringByResolvingSymlinksInPath.lastPathComponent] ||
+                [engineNames containsObject:file.lastPathComponent]) {
+                continue;
+            }
+            for (NSArray<NSString *> *symbols in BurrowImportedSymbols(file, engineNames).allValues) {
+                for (NSString *symbol in symbols) {
+                    NSMutableOrderedSet<NSString *> *users =
+                        engineSymbols[symbol] ?: (engineSymbols[symbol] = [NSMutableOrderedSet orderedSet]);
+                    [users addObject:tweak];
+                }
+            }
+        }
+        for (NSString *library in libraries) {
             if ([BurrowArm64eABI(library) isEqualToString:@"old"]) {
                 NSString *key = library.lastPathComponent;
                 oldLibraries[key] = [oldLibraries[key] ?: @[] arrayByAddingObject:tweak];
@@ -326,6 +349,32 @@ static int check(BurrowServicePaths *paths) {
     print([NSString stringWithFormat:@"Version range:   %@ (never loaded, as with ElleKit)",
                                      ranges.count ? [ranges componentsJoinedByString:@", "] : @"none"]);
     print([NSString stringWithFormat:@"Tweak managers:  %@", managers.count ? [managers componentsJoinedByString:@", "] : @"none"]);
+    NSMutableOrderedSet<NSString *> *engineUsers = [NSMutableOrderedSet orderedSet];
+    for (NSOrderedSet<NSString *> *users in engineSymbols.allValues) {
+        [engineUsers unionOrderedSet:users];
+    }
+    print([NSString stringWithFormat:@"Engine imports:  %lu symbols, used by %lu tweaks", (unsigned long)engineSymbols.count,
+                                     (unsigned long)engineUsers.count]);
+    // Whether Burrow's hooking engine has every one of them.
+    void *engine = dlopen(BurrowEnginePath.fileSystemRepresentation, RTLD_LAZY | RTLD_LOCAL);
+    NSMutableArray<NSString *> *lacking = [NSMutableArray array];
+    for (NSString *symbol in [engineSymbols.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
+        if (engine && !dlsym(engine, symbol.UTF8String)) {
+            [lacking addObject:[NSString stringWithFormat:@"%@ (used by %@)", symbol,
+                                                          [engineSymbols[symbol].array componentsJoinedByString:@", "]]];
+        }
+    }
+    if (!engine) {
+        const char *reason = dlerror();
+        print([NSString stringWithFormat:@"Burrow's engine: cannot be opened: %s", reason ? reason : "unknown error"]);
+    } else {
+        print([NSString stringWithFormat:@"Burrow's engine: %@", lacking.count ? [@"lacks " stringByAppendingString:[lacking componentsJoinedByString:@"; "]]
+                                                                                : @"has every one of them"]);
+    }
+    if (lacking.count || !engine) {
+        print(@"Switching the hooking engine to Burrow's would break the tweaks that need what it lacks.");
+        return 1;
+    }
     if ((old.count || oldLibraries.count) && !shim) {
         print(@"Tweaks with the old arm64e ABI crash arm64e processes without the shim.");
         return 1;

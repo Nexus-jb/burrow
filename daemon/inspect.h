@@ -27,4 +27,11 @@ NSString *_Nullable BurrowArm64eABI(NSString *path);
 // @executable_path are left out: they depend on the process.
 NSArray<NSString *> *BurrowJailbreakLibraries(NSString *path, NSArray<NSString *> *roots);
 
+// The symbols, without their leading underscore, that a Mach-O file imports
+// from each library it loads whose file name is one of libraryNames, keyed
+// by the library's install name. Read from the symbol table of its arm64e
+// slice (or its first slice without one).
+NSDictionary<NSString *, NSArray<NSString *> *> *BurrowImportedSymbols(NSString *path,
+                                                                       NSArray<NSString *> *libraryNames);
+
 NS_ASSUME_NONNULL_END

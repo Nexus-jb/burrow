@@ -24,6 +24,7 @@
 #include <libkern/OSByteOrder.h>
 #include <mach-o/fat.h>
 #include <mach-o/loader.h>
+#include <mach-o/nlist.h>
 #include <limits.h>
 #include <math.h>
 #include <spawn.h>
@@ -480,9 +481,48 @@ static NSData *macho_library(uint32_t subtype, NSArray<NSArray *> *commands) {
     return data;
 }
 
+// A thin arm64 library that imports malloc from libSystem and two hooking
+// functions from CydiaSubstrate, through its symbol table.
+static NSData *macho_importer(void) {
+    const char *libraries[] = { "/usr/lib/libSystem.B.dylib", "@rpath/CydiaSubstrate.framework/CydiaSubstrate" };
+    NSMutableData *commands = [NSMutableData data];
+    for (int i = 0; i < 2; i++) {
+        uint32_t size = (uint32_t)((sizeof(struct dylib_command) + strlen(libraries[i]) + 1 + 7) & ~(size_t)7);
+        NSMutableData *command = [NSMutableData dataWithLength:size];
+        uint32_t words[3] = { LC_LOAD_DYLIB, size, sizeof(struct dylib_command) };
+        memcpy(command.mutableBytes, words, sizeof words);
+        memcpy((char *)command.mutableBytes + sizeof(struct dylib_command), libraries[i], strlen(libraries[i]));
+        [commands appendData:command];
+    }
+    static const char strings[] = "\0_MSHookFunction\0_malloc\0_MSHookMessageEx\0";
+    uint32_t start = (uint32_t)(sizeof(struct mach_header_64) + commands.length + sizeof(struct symtab_command));
+    struct symtab_command symtab = { LC_SYMTAB, sizeof symtab, start, 3,
+                                     start + 3 * (uint32_t)sizeof(struct nlist_64), sizeof strings };
+    [commands appendBytes:&symtab length:sizeof symtab];
+    struct nlist_64 symbols[3] = {
+        { .n_un.n_strx = 1, .n_type = N_UNDF | N_EXT, .n_desc = 2 << 8 },
+        { .n_un.n_strx = 17, .n_type = N_UNDF | N_EXT, .n_desc = 1 << 8 },
+        { .n_un.n_strx = 25, .n_type = N_UNDF | N_EXT, .n_desc = 2 << 8 },
+    };
+    struct mach_header_64 header = { MH_MAGIC_64, CPU_TYPE_ARM64, 0, MH_DYLIB, 3, (uint32_t)commands.length, 0, 0 };
+    NSMutableData *data = [NSMutableData dataWithBytes:&header length:sizeof header];
+    [data appendData:commands];
+    [data appendBytes:symbols length:sizeof symbols];
+    [data appendBytes:strings length:sizeof strings];
+    return data;
+}
+
 // Reading what a process has loaded, on this very process, and reading
-// arm64e ABIs and linked libraries from Mach-O headers.
+// arm64e ABIs, linked libraries and imports from Mach-O headers.
 static void test_inspect(NSString *scratch) {
+    NSString *importer = [scratch stringByAppendingPathComponent:@"Importer.dylib"];
+    [macho_importer() writeToFile:importer atomically:YES];
+    NSDictionary *imports = BurrowImportedSymbols(importer, @[ @"CydiaSubstrate", @"libhooker.dylib" ]);
+    CHECK([imports isEqualToDictionary:(@{
+        @"@rpath/CydiaSubstrate.framework/CydiaSubstrate" : @[ @"MSHookFunction", @"MSHookMessageEx" ]
+    })]);
+    CHECK(BurrowImportedSymbols(importer, @[ @"libhooker.dylib" ]).count == 0);
+
     // A tweak that loads a library through its run path; that library loads
     // another next to it, and a system library that is left out.
     NSString *lib = [scratch stringByAppendingPathComponent:@"lib"];
