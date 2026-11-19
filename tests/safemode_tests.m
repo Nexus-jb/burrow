@@ -388,6 +388,61 @@ static void test_guard(NSString *fixtures, NSString *dpkg, NSString *scratch) {
     CHECK(later.guardReason == nil);
 }
 
+// The engine's guard: the same reports, and crashes inside Burrow's engine
+// or outside any image.
+static void test_engine_guard(NSString *fixtures, NSString *dpkg, NSString *scratch) {
+    NSFileManager *files = [NSFileManager defaultManager];
+    NSDate *switched = [fixture(fixtures, @"guard-springboard-1.ips").date dateByAddingTimeInterval:-60];
+    // A service reading its own copy of the given reports, with the engine's
+    // trial ending trial seconds after the switch.
+    BurrowService * (^service_for)(NSString *, NSArray<NSString *> *, NSTimeInterval) =
+        ^(NSString *name, NSArray<NSString *> *names, NSTimeInterval trial) {
+            NSString *reports = [scratch stringByAppendingPathComponent:name];
+            [files createDirectoryAtPath:reports withIntermediateDirectories:YES attributes:nil error:NULL];
+            for (NSString *report in names) {
+                [files copyItemAtPath:[fixtures stringByAppendingPathComponent:report]
+                               toPath:[reports stringByAppendingPathComponent:report]
+                                error:NULL];
+            }
+            NSString *state = [scratch stringByAppendingPathComponent:[name stringByAppendingString:@"-state"]];
+            BurrowServicePaths *paths = [[BurrowServicePaths alloc] init];
+            paths.reportDirectories = @[ reports ];
+            paths.tweakDirectories = @[ @"/var/jb/usr/lib/TweakInject" ];
+            paths.jailbreakRoots = @[ @"/var/jb", RealRoot ];
+            paths.dpkgDirectory = dpkg;
+            paths.settingsPath = [state stringByAppendingString:@"-loader.plist"];
+            paths.safeModeStatePath = [state stringByAppendingString:@"-safe-mode.plist"];
+            paths.crashLogDirectory = [state stringByAppendingString:@"-crashes"];
+            BurrowService *service = [[BurrowService alloc] initWithPaths:paths];
+            service.engineGuardSince = switched;
+            service.engineTrialUntil = [switched dateByAddingTimeInterval:trial];
+            return service;
+        };
+
+    BurrowService *springboard =
+        service_for(@"engine-springboard", @[ @"guard-springboard-1.ips", @"guard-springboard-2.ips" ], 15 * 60);
+    [springboard scan];
+    CHECK([springboard.engineGuardReason
+        isEqualToString:@"SpringBoard crashed 2 times soon after Burrow's engine took over"]);
+    CHECK(springboard.guardReason == nil);
+    [springboard resetEngineGuard];
+    CHECK(springboard.engineGuardReason == nil);
+
+    BurrowService *inside = service_for(@"engine-inside", @[ @"engine-crash.ips" ], 0);
+    [inside scan];
+    CHECK([inside.engineGuardReason isEqualToString:@"Preferences crashed inside Burrow's hooking engine"]);
+
+    BurrowService *outside = service_for(@"engine-outside", @[ @"trampoline-crash.ips" ], 15 * 60);
+    [outside scan];
+    CHECK([outside.engineGuardReason
+        isEqualToString:@"Preferences crashed outside any image, as in a hook's trampoline, soon after Burrow's "
+                        @"engine took over"]);
+    // After the trial, a crash outside any image does not count.
+    BurrowService *after = service_for(@"engine-after", @[ @"trampoline-crash.ips" ], 60);
+    [after scan];
+    CHECK(after.engineGuardReason == nil);
+}
+
 static NSString *in_path(NSString *command) {
     for (NSString *directory in [NSProcessInfo.processInfo.environment[@"PATH"] componentsSeparatedByString:@":"]) {
         NSString *path = [directory stringByAppendingPathComponent:command];
@@ -457,6 +512,54 @@ static void test_switch(NSString *scratch) {
     CHECK(![loader_switch useBurrowLoader:NULL]);
     CHECK([loader_switch.loaderOwner isEqualToString:@"ElleKit"]);
     CHECK(![files destinationOfSymbolicLinkAtPath:diverted error:NULL]);
+
+    // The hooking engine: three of ElleKit's four links are there.
+    NSString *ellekit = @"/var/jb/usr/lib/libellekit.dylib";
+    [@"ElleKit" writeToFile:[root stringByAppendingPathComponent:ellekit] atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+    NSString *frameworks = [root stringByAppendingPathComponent:@"var/jb/Library/Frameworks/CydiaSubstrate.framework"];
+    NSString *burrow_framework = [lib stringByAppendingPathComponent:@"burrow/CydiaSubstrate.framework"];
+    for (NSString *directory in @[ frameworks, burrow_framework ]) {
+        [files createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:NULL];
+    }
+    NSString *burrow_engine = [burrow_framework stringByAppendingPathComponent:@"CydiaSubstrate"];
+    [@"Burrow" writeToFile:burrow_engine atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+    NSArray<NSString *> *links = @[ [frameworks stringByAppendingPathComponent:@"CydiaSubstrate"],
+                                    [lib stringByAppendingPathComponent:@"libsubstrate.dylib"],
+                                    [lib stringByAppendingPathComponent:@"libhooker.dylib"] ];
+    for (NSString *link in links) {
+        [files createSymbolicLinkAtPath:link withDestinationPath:ellekit error:NULL];
+    }
+    NSString *blackjack = [lib stringByAppendingPathComponent:@"libblackjack.dylib"];
+    CHECK([loader_switch.engineOwner isEqualToString:@"ElleKit"]);
+    error = nil;
+    switched = [loader_switch useBurrowEngine:&error];
+    CHECK(switched);
+    if (!switched) {
+        fprintf(stderr, "[safemode]   %s\n", error.localizedDescription.UTF8String);
+    }
+    CHECK([loader_switch.engineOwner isEqualToString:@"Burrow"]);
+    CHECK([[files destinationOfSymbolicLinkAtPath:[frameworks stringByAppendingPathComponent:@"CydiaSubstrate.ellekit"]
+                                            error:NULL] isEqualToString:ellekit]);
+    CHECK([[files destinationOfSymbolicLinkAtPath:[lib stringByAppendingPathComponent:@"libhooker.ellekit.dylib"]
+                                            error:NULL] isEqualToString:ellekit]);
+    CHECK(![files destinationOfSymbolicLinkAtPath:blackjack error:NULL]);
+    error = nil;
+    back = [loader_switch useElleKitEngine:&error];
+    CHECK(back);
+    if (!back) {
+        fprintf(stderr, "[safemode]   %s\n", error.localizedDescription.UTF8String);
+    }
+    CHECK([loader_switch.engineOwner isEqualToString:@"ElleKit"]);
+    for (NSString *link in links) {
+        CHECK([[files destinationOfSymbolicLinkAtPath:link error:NULL] isEqualToString:ellekit]);
+    }
+    CHECK(![files destinationOfSymbolicLinkAtPath:[lib stringByAppendingPathComponent:@"libhooker.ellekit.dylib"]
+                                            error:NULL]);
+    CHECK([loader_switch useElleKitEngine:NULL]);
+    // Without Burrow's engine nothing changes.
+    [files removeItemAtPath:burrow_engine error:NULL];
+    CHECK(![loader_switch useBurrowEngine:NULL]);
+    CHECK([loader_switch.engineOwner isEqualToString:@"ElleKit"]);
 }
 
 // A thin 64-bit Mach-O library with the given cpusubtype and load
@@ -834,6 +937,8 @@ int main(int argc, char **argv) {
                      [dir stringByAppendingPathComponent:@"safemode-dpkg"], scratch);
         test_guard([dir stringByAppendingPathComponent:@"safemode-fixtures"],
                    [dir stringByAppendingPathComponent:@"safemode-dpkg"], scratch);
+        test_engine_guard([dir stringByAppendingPathComponent:@"safemode-fixtures"],
+                          [dir stringByAppendingPathComponent:@"safemode-dpkg"], scratch);
         test_switch(scratch);
         test_inspect(scratch);
         test_real_crashes(dir, scratch);

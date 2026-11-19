@@ -99,8 +99,10 @@ SCRIPT
 cat > "$stage/DEBIAN/prerm" <<'SCRIPT'
 #!/var/jb/bin/sh
 # SPDX-License-Identifier: Apache-2.0
-# Removing Burrow gives the tweak loader back to ElleKit first.
+# Removing Burrow gives the hooking engine and the tweak loader back to
+# ElleKit first.
 if [ "$1" = remove ] || [ "$1" = deconfigure ]; then
+    /var/jb/usr/bin/burrowctl engine ellekit >/dev/null 2>&1 || true
     /var/jb/usr/bin/burrowctl loader ellekit >/dev/null 2>&1 || true
 fi
 launchctl unload /var/jb/Library/LaunchDaemons/com.nexusjb.burrowd.plist >/dev/null 2>&1 || true
@@ -109,14 +111,23 @@ SCRIPT
 cat > "$stage/DEBIAN/postrm" <<'SCRIPT'
 #!/var/jb/bin/sh
 # SPDX-License-Identifier: Apache-2.0
-# In case burrowctl could not run: no link to a removed loader is left.
-if [ "$1" = remove ] || [ "$1" = purge ]; then
-    loader=/var/jb/usr/lib/TweakLoader.dylib
-    if [ -L "$loader" ] && [ "$(readlink "$loader")" = /var/jb/usr/lib/burrow/BurrowLoader.dylib ]; then
-        rm -f "$loader"
+# In case burrowctl could not run: no link to a removed loader or engine is
+# left, and ElleKit's files are back.
+undo() {
+    if [ -L "$1" ] && [ "$(readlink "$1")" = "$3" ]; then
+        rm -f "$1"
     fi
-    dpkg-divert --package com.nexusjb.burrow --rename --divert /var/jb/usr/lib/TweakLoader.ellekit.dylib \
-        --remove "$loader" >/dev/null 2>&1 || true
+    dpkg-divert --package com.nexusjb.burrow --rename --divert "$2" --remove "$1" >/dev/null 2>&1 || true
+}
+if [ "$1" = remove ] || [ "$1" = purge ]; then
+    engine=/var/jb/usr/lib/burrow/CydiaSubstrate.framework/CydiaSubstrate
+    undo /var/jb/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate \
+        /var/jb/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate.ellekit "$engine"
+    for library in libsubstrate libhooker libblackjack; do
+        undo "/var/jb/usr/lib/$library.dylib" "/var/jb/usr/lib/$library.ellekit.dylib" "$engine"
+    done
+    undo /var/jb/usr/lib/TweakLoader.dylib /var/jb/usr/lib/TweakLoader.ellekit.dylib \
+        /var/jb/usr/lib/burrow/BurrowLoader.dylib
 fi
 if [ "$1" = purge ]; then
     rm -rf /var/jb/var/lib/burrow

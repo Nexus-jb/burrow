@@ -11,6 +11,9 @@
 //   burrowctl enable TWEAK [PROCESS]
 //                             turn a tweak Safe Mode turned off back on, in
 //                             PROCESS as Safe Mode named it or everywhere
+//   burrowctl engine burrow|ellekit
+//                             which hooking engine the tweaks get (root only;
+//                             Burrow's needs Burrow's loader)
 //   burrowctl check           the hooking engine's symbols the tweaks use, and
 //                             whether Burrow's engine has them; the tweaks
 //                             and libraries that need the old arm64e ABI shim
@@ -116,6 +119,18 @@ static int status(BurrowServicePaths *paths) {
     } else if (went_back) {
         print([NSString stringWithFormat:@"Guard:           went back to ElleKit on %@: %@", format_date(went_back[@"Date"]),
                                          went_back[@"Reason"]]);
+    }
+    NSDate *engine_since = BurrowEngineActiveSince();
+    NSDictionary *engine_trial = [NSDictionary dictionaryWithContentsOfFile:BurrowEngineTrialPath];
+    NSDictionary *engine_back = [NSDictionary dictionaryWithContentsOfFile:BurrowEngineGuardPath];
+    if (engine_since && [engine_trial[@"Until"] isKindOfClass:[NSDate class]] &&
+        [engine_trial[@"Until"] timeIntervalSinceNow] > 0) {
+        print([NSString stringWithFormat:@"Engine guard:    watching closely until %@", format_date(engine_trial[@"Until"])]);
+    } else if (engine_since) {
+        print(@"Engine guard:    watching for crashes in Burrow's engine");
+    } else if (engine_back) {
+        print([NSString stringWithFormat:@"Engine guard:    went back to ElleKit's engine on %@: %@",
+                                         format_date(engine_back[@"Date"]), engine_back[@"Reason"]]);
     }
     return 0;
 }
@@ -427,6 +442,55 @@ static int loader(NSString *which) {
     return 2;
 }
 
+static int engine(NSString *which) {
+    if (geteuid() != 0) {
+        print(@"Switching the hooking engine needs root.");
+        return 1;
+    }
+    BurrowSwitch *system_switch = [BurrowSwitch systemSwitch];
+    NSError *error = nil;
+    if ([which isEqualToString:@"burrow"]) {
+        // Safe Mode and the guard work through Burrow's loader and burrowd.
+        if (![[system_switch loaderOwner] isEqualToString:@"Burrow"]) {
+            print(@"Switch the tweak loader first: burrowctl loader burrow");
+            return 1;
+        }
+        for (int tries = 0; !BurrowDaemonPID() && tries < 20; tries++) {
+            usleep(500000);
+        }
+        if (!BurrowDaemonPID()) {
+            print(@"burrowd is not running, and the guard needs it. Reinstall the Burrow package first.");
+            return 1;
+        }
+        NSDate *until = [NSDate dateWithTimeIntervalSinceNow:BurrowTrialLength];
+        [[NSFileManager defaultManager] removeItemAtPath:BurrowEngineGuardPath error:NULL];
+        if (![@{ @"Until" : until } writeToFile:BurrowEngineTrialPath atomically:YES] ||
+            ![system_switch useBurrowEngine:&error]) {
+            [[NSFileManager defaultManager] removeItemAtPath:BurrowEngineTrialPath error:NULL];
+            print([NSString stringWithFormat:@"The hooking engine did not change: %@",
+                                             error.localizedDescription ?: @"the trial cannot be recorded"]);
+            return 1;
+        }
+        print(@"Burrow's engine now hooks for the tweaks in new processes.");
+        print([NSString stringWithFormat:@"Until %@, burrowd goes back to ElleKit's engine by itself if SpringBoard "
+                                         @"crashes twice or a process crashes outside any image, and at any time if a "
+                                         @"process crashes inside Burrow's engine with no tweak to blame.",
+                                         format_date(until)]);
+        print(@"Respring to load SpringBoard with it: killall SpringBoard");
+        return 0;
+    }
+    if ([which isEqualToString:@"ellekit"]) {
+        if (![system_switch useElleKitEngine:&error]) {
+            print([NSString stringWithFormat:@"The hooking engine did not change: %@", error.localizedDescription]);
+            return 1;
+        }
+        [[NSFileManager defaultManager] removeItemAtPath:BurrowEngineTrialPath error:NULL];
+        print(@"ElleKit's engine hooks for the tweaks in new processes again. Respring to load SpringBoard with it.");
+        return 0;
+    }
+    return 2;
+}
+
 static int crashes(BurrowServicePaths *paths, NSUInteger count) {
     NSArray *entries = crash_entries(paths);
     if (!entries.count) {
@@ -509,6 +573,12 @@ int main(int argc, char **argv) {
         if ([command isEqualToString:@"enable"] && (argc == 3 || argc == 4)) {
             return enable(paths, @(argv[2]), argc == 4 ? @(argv[3]) : nil);
         }
+        if ([command isEqualToString:@"engine"] && argc == 3) {
+            int result = engine(@(argv[2]));
+            if (result != 2) {
+                return result;
+            }
+        }
         if ([command isEqualToString:@"loader"] && argc == 3) {
             int result = loader(@(argv[2]));
             if (result != 2) {
@@ -516,7 +586,7 @@ int main(int argc, char **argv) {
             }
         }
         fprintf(stderr, "usage: burrowctl status | crashes [count] | events | enable TWEAK [PROCESS] | check | "
-                        "why NAME|FILE | loaded NAME | loader burrow|ellekit\n");
+                        "why NAME|FILE | loaded NAME | loader burrow|ellekit | engine burrow|ellekit\n");
         return 2;
     }
 }

@@ -41,6 +41,11 @@ int main(void) {
                 service.guardSince = since;
                 NSDictionary *trial = [NSDictionary dictionaryWithContentsOfFile:BurrowTrialPath];
                 service.guardTrialUntil = [trial[@"Until"] isKindOfClass:[NSDate class]] ? trial[@"Until"] : nil;
+                NSDate *engineSince = BurrowEngineActiveSince();
+                service.engineGuardSince = engineSince;
+                NSDictionary *engineTrial = [NSDictionary dictionaryWithContentsOfFile:BurrowEngineTrialPath];
+                service.engineTrialUntil =
+                    [engineTrial[@"Until"] isKindOfClass:[NSDate class]] ? engineTrial[@"Until"] : nil;
                 NSUInteger logged = [service scan];
                 if (since && service.guardReason) {
                     // The guard: back to the jailbreak's own loader.
@@ -55,6 +60,21 @@ int main(void) {
                                      error.localizedDescription);
                     }
                     [service resetGuard];
+                }
+                if (engineSince && service.engineGuardReason) {
+                    // The engine's guard: back to the jailbreak's own engine.
+                    NSString *reason = service.engineGuardReason;
+                    NSError *error = nil;
+                    if ([[BurrowSwitch systemSwitch] useElleKitEngine:&error]) {
+                        os_log_error(OS_LOG_DEFAULT, "burrowd: back to ElleKit's engine: %{public}@", reason);
+                        [@{ @"Date" : [NSDate date], @"Reason" : reason } writeToFile:BurrowEngineGuardPath
+                                                                           atomically:YES];
+                        [[NSFileManager defaultManager] removeItemAtPath:BurrowEngineTrialPath error:NULL];
+                    } else {
+                        os_log_error(OS_LOG_DEFAULT, "burrowd: cannot go back to ElleKit's engine: %{public}@",
+                                     error.localizedDescription);
+                    }
+                    [service resetEngineGuard];
                 }
                 if (logged) {
                     os_log(OS_LOG_DEFAULT, "burrowd: logged %lu crashes", (unsigned long)logged);

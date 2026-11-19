@@ -15,6 +15,8 @@ extern NSString *const BurrowDaemonPIDPath;
 extern NSString *const BurrowDaemonStatisticsPath;  // what burrowd has read, written after each look
 extern NSString *const BurrowTrialPath;             // when the guard's trial ends: Until (NSDate)
 extern NSString *const BurrowGuardPath;             // when the guard went back to ElleKit: Date, Reason
+extern NSString *const BurrowEngineTrialPath;       // the same two for the hooking engine
+extern NSString *const BurrowEngineGuardPath;
 
 // How long after taking over the guard watches SpringBoard most closely.
 extern const NSTimeInterval BurrowTrialLength;
@@ -24,6 +26,9 @@ NSString *BurrowOwnerOfFile(NSString *path);
 
 // When Burrow's loader became the system's tweak loader, or nil.
 NSDate *_Nullable BurrowLoaderActiveSince(void);
+
+// When Burrow's engine became the system's hooking engine, or nil.
+NSDate *_Nullable BurrowEngineActiveSince(void);
 
 // The running burrowd's process ID, or 0.
 pid_t BurrowDaemonPID(void);

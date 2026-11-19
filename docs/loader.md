@@ -156,6 +156,26 @@ burrowd guards the switch and goes back to ElleKit's loader by itself
 `burrowctl status` shows the loader, the trial and the guard's reason when
 it went back. Removing the package goes back to ElleKit's loader first.
 
+The hooking engine switches the same way, after the loader: `burrowctl
+engine burrow` diverts each of ElleKit's links to its engine that is there,
+`/var/jb/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate` and
+`libsubstrate.dylib`, `libhooker.dylib` and `libblackjack.dylib` in
+`/var/jb/usr/lib`, to a name with `.ellekit` in it, and links each to
+`/var/jb/usr/lib/burrow/CydiaSubstrate.framework/CydiaSubstrate`: all of
+them or none. `libsubstitute` stays ElleKit's, since Burrow does not
+provide its interface. Tweaks that are already running keep the engine
+they loaded. The engine's guard, with its own 15 minute trial, goes back to
+ElleKit's engine:
+
+- at any time, when a process crashes with Burrow's engine on the crashed
+  thread and no tweak to blame;
+- during the trial, when a process crashes outside any image, as in the
+  trampoline of a hook, or when SpringBoard crashes twice.
+
+Before switching, `burrowctl check` reads the symbols each tweak, and each
+library it loads, imports from the engine's libraries, and looks each one
+up in Burrow's engine.
+
 Device results of the switch:
 
 | Device | Chip | iOS | Jailbreak | Build | Result |
