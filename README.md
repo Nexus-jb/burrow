@@ -41,6 +41,12 @@ works on real devices.
 
 iOS 15 and later. Rootful jailbreaks are not planned for 1.0.
 
+Devices with an Apple A12 chip or newer: iPhone XS, iPhone XR and later.
+These are the arm64e chips, with pointer authentication. The package
+refuses to install on older chips. Burrow is still built for arm64 as well,
+because apps that are built for arm64 run as arm64 on these devices too, and
+tweaks are loaded into them.
+
 ## Building
 
 The hooking engine builds with `make` on macOS or Linux and runs its tests on

@@ -93,6 +93,9 @@ jobs:
             dpkg-deb --info "$deb"
             dpkg-deb --contents "$deb"
           done
+          # The Burrow package carries the chip check as its preinst.
+          dpkg-deb --ctrl-tarfile build/packages/com.nexusjb.burrow_*.deb | tar -tf - | grep -Eq '^(\./)?preinst$'
+          sh tests/preinst_tests.sh
           ldid -e build/ios/arm64e/hook-tests
           lipo -info build/ios/arm64/hook-tests build/ios/arm64e/hook-tests build/ios/BurrowSampleTweak.dylib
           otool -L build/ios/BurrowSampleTweak.dylib

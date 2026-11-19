@@ -86,6 +86,8 @@ Description: Tweak injection platform (development build)
  and "burrowctl loader ellekit" switches back. Run burrowctl status.
 CONTROL
 
+# The preinst refuses chips older than the A12.
+install -m 0755 scripts/preinst.sh "$stage/DEBIAN/preinst"
 cat > "$stage/DEBIAN/postinst" <<'SCRIPT'
 #!/var/jb/bin/sh
 # SPDX-License-Identifier: Apache-2.0
