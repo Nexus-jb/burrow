@@ -98,8 +98,8 @@ static int status(BurrowServicePaths *paths) {
         for (NSDictionary *event in safe_mode_events(paths)) {
             off += ![event[BurrowSafeModeEventAction] isEqual:@"on"];
         }
-        print([NSString stringWithFormat:@"Safe Mode:       on since %@, %lu tweaks turned off", format_date(since),
-                                         (unsigned long)off]);
+        print([NSString stringWithFormat:@"Safe Mode:       on since %@, turned tweaks off %lu times (burrowctl events)",
+                                         format_date(since), (unsigned long)off]);
     } else {
         print(@"Safe Mode:       off until Burrow's loader loads the tweaks");
     }
