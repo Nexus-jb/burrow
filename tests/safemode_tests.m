@@ -108,6 +108,19 @@ static void test_fixtures(NSString *fixtures, NSString *scratch) {
     NSString *malformed = [fixtures stringByAppendingPathComponent:@"malformed.ips"];
     CHECK([BurrowCrashReport reportWithContentsOfFile:malformed error:NULL] == nil);
     CHECK(segv.burrowLoadingTweak == nil);
+    CHECK(!segv.isWatchdogKill && segv.terminationCode == nil);
+
+    // A watchdog kill: no thread marked, the main thread stuck under a tweak.
+    BurrowCrashReport *watchdog = fixture(fixtures, @"watchdog.ips");
+    CHECK(watchdog.isCrash && watchdog.isWatchdogKill);
+    CHECK([watchdog.terminationNamespace isEqualToString:@"FRONTBOARD"]);
+    CHECK([watchdog.terminationReason hasPrefix:@"scene-create watchdog transgression"]);
+    CHECK(watchdog.crashedThreadFrames.count == 6);
+    BurrowCrashAnalysis *hang = [[[BurrowCrashAnalyzer alloc]
+        initWithTweakDirectories:@[ @"/var/jb/usr/lib/TweakInject", [RealRoot stringByAppendingString:@"/usr/lib/TweakInject"] ]
+                  jailbreakRoots:@[ @"/var/jb", RealRoot ]] analyzeReport:watchdog];
+    CHECK([hang.culprit isEqualToString:@"Hangs"]);
+    CHECK([hang.reason hasPrefix:@"killed by the watchdog for not responding in Hangs.dylib"]);
 
     // A crash in the Objective-C runtime while Burrow's loader opened a
     // tweak: the loader names the thread after it.
@@ -234,6 +247,71 @@ static NSDictionary *record(BurrowCrashLog *log, NSString *dir, NSString *name) 
                 error.localizedDescription.UTF8String ?: "no report");
     }
     return entry;
+}
+
+// On Dopamine, packages list their tweaks under
+// Library/MobileSubstrate/DynamicLibraries, a link to usr/lib/TweakInject,
+// where the loader finds them.
+static void test_package_links(NSString *scratch) {
+    NSFileManager *files = [NSFileManager defaultManager];
+    NSString *root = [scratch stringByAppendingPathComponent:@"package-links"];
+    NSString *inject = [root stringByAppendingPathComponent:@"usr/lib/TweakInject"];
+    NSString *substrate = [root stringByAppendingPathComponent:@"Library/MobileSubstrate"];
+    NSString *dynamic = [substrate stringByAppendingPathComponent:@"DynamicLibraries"];
+    NSString *info = [root stringByAppendingPathComponent:@"dpkg/info"];
+    for (NSString *directory in @[ inject, substrate, info ]) {
+        [files createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:NULL];
+    }
+    CHECK([files createSymbolicLinkAtPath:dynamic withDestinationPath:@"../../usr/lib/TweakInject" error:NULL]);
+    [@"tweak" writeToFile:[inject stringByAppendingPathComponent:@"Baz.dylib"] atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+    [@"tweak" writeToFile:[root stringByAppendingPathComponent:@"usr/lib/Qux.dylib"] atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+    // Qux's and Lone's tweaks are links to libraries that other packages
+    // list. Qux's package lists its link; nothing lists Lone's.
+    [@"tweak" writeToFile:[root stringByAppendingPathComponent:@"usr/lib/Lone.dylib"] atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+    for (NSString *tweak in @[ @"Qux", @"Lone" ]) {
+        NSString *target = [@"../" stringByAppendingString:[tweak stringByAppendingString:@".dylib"]];
+        CHECK([files createSymbolicLinkAtPath:[inject stringByAppendingPathComponent:[tweak stringByAppendingString:@".dylib"]]
+                          withDestinationPath:target
+                                        error:NULL]);
+    }
+    NSDictionary<NSString *, NSString *> *lists = @{
+        @"com.example.baz" : [@[ [dynamic stringByAppendingPathComponent:@"Baz.dylib"],
+                                 [dynamic stringByAppendingPathComponent:@"Baz.plist"],
+                                 [dynamic stringByAppendingPathComponent:@"Gone.dylib"] ] componentsJoinedByString:@"\n"],
+        @"com.example.qux" : [dynamic stringByAppendingPathComponent:@"Qux.dylib"],
+        @"com.example.quxlib" : [root stringByAppendingPathComponent:@"usr/lib/Qux.dylib"],
+        @"com.example.lonelib" : [root stringByAppendingPathComponent:@"usr/lib/Lone.dylib"],
+    };
+    NSMutableString *status = [NSMutableString string];
+    for (NSString *package in lists) {
+        [[lists[package] stringByAppendingString:@"\n"] writeToFile:[info stringByAppendingPathComponent:[package stringByAppendingString:@".list"]]
+                                                          atomically:YES
+                                                            encoding:NSUTF8StringEncoding
+                                                               error:NULL];
+        [status appendFormat:@"Package: %@\nStatus: install ok installed\nVersion: 1.0\n\n", package];
+    }
+    [status writeToFile:[root stringByAppendingPathComponent:@"dpkg/status"] atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+
+    BurrowPackageIndex *packages = [[BurrowPackageIndex alloc] initWithDpkgDirectory:[root stringByAppendingPathComponent:@"dpkg"]];
+    // Listed under the link, found under the directory the loader reads.
+    CHECK([[packages packageForLibrary:[inject stringByAppendingPathComponent:@"Baz.dylib"]][BurrowPackageIdentifier]
+        isEqualToString:@"com.example.baz"]);
+    CHECK([[packages packageForLibrary:[dynamic stringByAppendingPathComponent:@"Baz.dylib"]][BurrowPackageIdentifier]
+        isEqualToString:@"com.example.baz"]);
+    // A removed library is still found through its directory.
+    CHECK([[packages packageForLibrary:[inject stringByAppendingPathComponent:@"Gone.dylib"]][BurrowPackageIdentifier]
+        isEqualToString:@"com.example.baz"]);
+    // A tweak that is a link belongs to the package that lists the link, and
+    // its target to the package that lists the target.
+    CHECK([[packages packageForLibrary:[inject stringByAppendingPathComponent:@"Qux.dylib"]][BurrowPackageIdentifier]
+        isEqualToString:@"com.example.qux"]);
+    CHECK([[packages packageForLibrary:[root stringByAppendingPathComponent:@"usr/lib/Qux.dylib"]][BurrowPackageIdentifier]
+        isEqualToString:@"com.example.quxlib"]);
+    // A link no package lists belongs to the package of the file it leads to.
+    CHECK([[packages packageForLibrary:[inject stringByAppendingPathComponent:@"Lone.dylib"]][BurrowPackageIdentifier]
+        isEqualToString:@"com.example.lonelib"]);
+    CHECK([packages packageForLibrary:[inject stringByAppendingPathComponent:@"Other.dylib"]] == nil);
+    CHECK([packages packageForLibrary:@""] == nil);
 }
 
 static void test_crash_log(NSString *fixtures, NSString *dpkg, NSString *scratch) {
@@ -931,6 +1009,7 @@ int main(int argc, char **argv) {
         }
         NSString *scratch = @(scratch_template);
         test_fixtures([dir stringByAppendingPathComponent:@"safemode-fixtures"], scratch);
+        test_package_links(scratch);
         test_crash_log([dir stringByAppendingPathComponent:@"safemode-fixtures"],
                        [dir stringByAppendingPathComponent:@"safemode-dpkg"], scratch);
         test_service([dir stringByAppendingPathComponent:@"safemode-fixtures"],

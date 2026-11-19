@@ -21,6 +21,7 @@
 int proc_listallpids(void *buffer, int size);
 int proc_name(int pid, void *buffer, uint32_t size);
 int proc_pidinfo(int pid, int flavor, uint64_t arg, void *buffer, int size);
+int proc_pidpath(int pid, void *buffer, uint32_t size);
 #endif
 
 // The kernel's answer to PROC_PIDREGIONPATHINFO, laid out as in the
@@ -95,28 +96,54 @@ _Static_assert(offsetof(struct burrow_regionwithpathinfo, path) ==
                "path");
 #endif
 
-NSArray<NSNumber *> *BurrowProcessesNamed(NSString *name) {
-    NSMutableArray<NSNumber *> *found = [NSMutableArray array];
+NSDictionary<NSNumber *, NSString *> *BurrowRunningProcesses(void) {
+    NSMutableDictionary<NSNumber *, NSString *> *running = [NSMutableDictionary dictionary];
     int count = proc_listallpids(NULL, 0);
     if (count <= 0) {
-        return found;
+        return running;
     }
     // Room for processes started meanwhile.
     count += 64;
     pid_t *pids = calloc((size_t)count, sizeof *pids);
     if (!pids) {
-        return found;
+        return running;
     }
     int listed = proc_listallpids(pids, count * (int)sizeof *pids);
     for (int i = 0; i < listed; i++) {
         char process[2 * MAXCOMLEN + 1] = { 0 };
-        if (pids[i] > 0 && proc_name(pids[i], process, sizeof process) > 0 &&
-            [@(process) isEqualToString:name]) {
-            [found addObject:@(pids[i])];
+        if (pids[i] <= 0 || proc_name(pids[i], process, sizeof process) <= 0) {
+            continue;
         }
+        NSString *name = [NSString stringWithUTF8String:process];
+        if (!name) {
+            continue;
+        }
+        // The kernel keeps 31 characters of a name, so a longer one, such as
+        // com.apple.CloudDocs.MobileDocumentsFileProvider, is cut. The
+        // executable's file name is the whole of it.
+        if (strlen(process) >= 2 * MAXCOMLEN - 1) {
+            char path[4 * MAXPATHLEN] = { 0 };
+            if (proc_pidpath(pids[i], path, sizeof path) > 0) {
+                NSString *file = [NSString stringWithUTF8String:path].lastPathComponent;
+                if ([file hasPrefix:name]) {
+                    name = file;
+                }
+            }
+        }
+        running[@(pids[i])] = name;
     }
     free(pids);
-    return found;
+    return running;
+}
+
+NSArray<NSNumber *> *BurrowProcessesNamed(NSString *name) {
+    NSDictionary<NSNumber *, NSString *> *running = BurrowRunningProcesses();
+    NSArray<NSNumber *> *found = [running keysOfEntriesPassingTest:^BOOL(NSNumber *pid, NSString *process, BOOL *stop) {
+        (void)pid;
+        (void)stop;
+        return [process isEqualToString:name];
+    }].allObjects;
+    return [found sortedArrayUsingSelector:@selector(compare:)];
 }
 
 NSArray<NSString *> *BurrowMappedFiles(pid_t pid) {

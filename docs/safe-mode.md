@@ -30,7 +30,12 @@ JSON header line and a JSON body. Safe Mode reads:
 - the path and UUID of each image on the threads' stacks. Reports list only
   those images, not everything the process loaded;
 - the name of the crashed thread, which says when Burrow's loader was
-  opening a tweak (below).
+  opening a tweak (below);
+- why the system ended the process, when it did (`termination`). A
+  watchdog kill, code `0x8badf00d`, means the process stopped responding.
+  Such a report marks no thread, so the main thread, the one that hung, is
+  read as the crashed thread: a tweak stuck on it, such as one that waits
+  for the screen while its constructor runs, is blamed like a crashing one.
 
 Reports hide parts of some paths, such as `/Users/USER/*/Foo.dylib`, so
 Safe Mode recognizes tweaks by UUID: it reads the UUIDs of every tweak in
@@ -163,10 +168,18 @@ burrowctl why NAME     the newest crash report of the process NAME, among
                        one to blame, the tweak Burrow's loader was opening,
                        the images on the stacks that are not Apple's, and
                        the crashed thread
+burrowctl tweaks       every tweak: its package, what its filter is for,
+                       the running processes it is in (past ten, how many,
+                       with the ones its filter names and the latest
+                       started), its crashes in the crash log and how many
+                       came after Burrow's loader took over, and where it
+                       is turned off (root, to read every process)
 burrowctl loaded NAME  the tweak loader, hooking engine and tweaks in the
                        running process NAME. Burrow's loader is not mapped
                        once the jailbreak closes it; a process started after
-                       the switch is shown as loaded by it
+                       the switch is shown as loaded by it. A tweak that is a
+                       link to a library elsewhere, such as
+                       CepheiSpringBoard.dylib, is found by that library
 burrowctl check        the hooking engine's symbols the tweaks and their
                        libraries use, and whether Burrow's engine has them;
                        the tweaks and the libraries they load that use the

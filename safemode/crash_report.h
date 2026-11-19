@@ -44,6 +44,13 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly, copy, nullable) NSString *signalName;
 // Such as "KERN_INVALID_ADDRESS at 0x0000000000000010".
 @property (nonatomic, readonly, copy, nullable) NSString *exceptionSubtype;
+// Why the system ended the process, when it did: the namespace (such as
+// FRONTBOARD), the code (0x8badf00d for the watchdog) and the first reason.
+@property (nonatomic, readonly, copy, nullable) NSString *terminationNamespace;
+@property (nonatomic, readonly, nullable) NSNumber *terminationCode;
+@property (nonatomic, readonly, copy, nullable) NSString *terminationReason;
+// The watchdog killed the process for not responding: a hang, not a crash.
+@property (nonatomic, readonly) BOOL isWatchdogKill;
 // The uncaught exception's name and reason, when the crash was one.
 @property (nonatomic, readonly, copy, nullable) NSString *uncaughtExceptionName;
 @property (nonatomic, readonly, copy, nullable) NSString *uncaughtExceptionReason;

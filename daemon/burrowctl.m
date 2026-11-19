@@ -11,6 +11,8 @@
 //   burrowctl enable TWEAK [PROCESS]
 //                             turn a tweak Safe Mode turned off back on, in
 //                             PROCESS as Safe Mode named it or everywhere
+//   burrowctl tweaks          every tweak: what it is for, where it runs now,
+//                             its crashes, and where it is turned off
 //   burrowctl engine burrow|ellekit
 //                             which hooking engine the tweaks get (root only;
 //                             Burrow's needs Burrow's loader)
@@ -31,12 +33,15 @@
 
 #import "crash_log.h"
 #import "inspect.h"
+#import "packages.h"
 #import "safe_mode.h"
 #import "service.h"
 #import "state.h"
 #import "switch.h"
 
 #include <dlfcn.h>
+#include <limits.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 static NSString *format_date(id date) {
@@ -151,13 +156,50 @@ static NSString *owner_of_mapped(NSArray<NSString *> *files, NSArray<NSString *>
     return @"none";
 }
 
-static int loaded(NSString *name) {
+// The tweaks in directory that are links to libraries elsewhere, such as
+// CepheiSpringBoard.dylib, a link to Cephei.framework/Cephei: a process maps
+// the library under its own path, so the tweak is found by that path. The
+// library may also be in a process for another reason, as when a tweak links
+// it; then the tweak is shown there too.
+static NSDictionary<NSString *, NSArray<NSString *> *> *linked_tweaks(NSString *directory) {
+    NSMutableDictionary<NSString *, NSMutableArray<NSString *> *> *links = [NSMutableDictionary dictionary];
+    NSFileManager *files = [NSFileManager defaultManager];
+    for (NSString *file in [files contentsOfDirectoryAtPath:directory error:NULL]) {
+        if ([file hasPrefix:@"."] || ![file.pathExtension isEqualToString:@"dylib"]) {
+            continue;
+        }
+        NSString *path = [directory stringByAppendingPathComponent:file];
+        NSDictionary *attributes = [files attributesOfItemAtPath:path error:NULL];
+        if (![attributes[NSFileType] isEqualToString:NSFileTypeSymbolicLink]) {
+            continue;
+        }
+        char target[PATH_MAX];
+        if (!realpath(path.fileSystemRepresentation, target)) {
+            continue;
+        }
+        NSString *key = @(target);
+        NSMutableArray<NSString *> *names = links[key] ?: (links[key] = [NSMutableArray array]);
+        [names addObject:file.stringByDeletingPathExtension];
+    }
+    return links;
+}
+
+// The tweaks a mapped file is: the tweak itself, or the tweaks linked to it.
+static NSArray<NSString *> *tweaks_of_mapped(NSString *file, NSDictionary<NSString *, NSArray<NSString *> *> *links) {
+    if ([file containsString:@"/TweakInject/"] && [file hasSuffix:@".dylib"]) {
+        return @[ file.lastPathComponent.stringByDeletingPathExtension ];
+    }
+    return links[file] ?: @[];
+}
+
+static int loaded(NSString *name, NSString *tweakDirectory) {
     NSArray<NSNumber *> *pids = BurrowProcessesNamed(name);
     if (!pids.count) {
         print([NSString stringWithFormat:@"No running process is called %@.", name]);
         return 1;
     }
     int status = 0;
+    NSDictionary<NSString *, NSArray<NSString *> *> *links = linked_tweaks(tweakDirectory);
     for (NSNumber *pid in pids) {
         NSArray<NSString *> *files = BurrowMappedFiles(pid.intValue);
         if (!files) {
@@ -165,13 +207,11 @@ static int loaded(NSString *name) {
             status = 1;
             continue;
         }
-        NSMutableArray<NSString *> *tweaks = [NSMutableArray array];
+        NSMutableOrderedSet<NSString *> *found = [NSMutableOrderedSet orderedSet];
         for (NSString *file in files) {
-            if ([file containsString:@"/TweakInject/"] && [file hasSuffix:@".dylib"]) {
-                [tweaks addObject:file.lastPathComponent.stringByDeletingPathExtension];
-            }
+            [found addObjectsFromArray:tweaks_of_mapped(file, links)];
         }
-        [tweaks sortUsingSelector:@selector(compare:)];
+        NSArray<NSString *> *tweaks = [found.array sortedArrayUsingSelector:@selector(compare:)];
         print([NSString stringWithFormat:@"%@ (pid %@)", name, pid]);
         NSString *loader = owner_of_mapped(files, @[ @"/burrow/BurrowLoader.dylib" ], @[ @"/ellekit/libinjector.dylib" ]);
         // Burrow's loader is closed once it has loaded the tweaks, so it is
@@ -202,7 +242,7 @@ static int loaded(NSString *name) {
         NSString *root = [@"/var/jb" stringByResolvingSymlinksInPath];
         NSMutableArray<NSString *> *others = [NSMutableArray array];
         for (NSString *file in files) {
-            if ([file containsString:@"/TweakInject/"]) {
+            if ([file containsString:@"/TweakInject/"] || links[file]) {
                 continue;
             }
             for (NSString *prefix in @[ [root stringByAppendingString:@"/"], @"/var/jb/" ]) {
@@ -267,6 +307,12 @@ static int why(BurrowServicePaths *paths, NSString *what) {
     print([NSString stringWithFormat:@"Date:      %@", format_date(report.date)]);
     print([NSString stringWithFormat:@"Exception: %@ (%@)%@", report.exceptionType ?: @"?", report.signalName ?: @"?",
                                      report.exceptionSubtype ? [@", " stringByAppendingString:report.exceptionSubtype] : @""]);
+    if (report.terminationNamespace || report.terminationCode) {
+        print([NSString stringWithFormat:@"Ended by: %@ 0x%llx%@%@", report.terminationNamespace ?: @"?",
+                                         report.terminationCode.unsignedLongLongValue,
+                                         report.isWatchdogKill ? @" (the watchdog: not responding)" : @"",
+                                         report.terminationReason ? [@", " stringByAppendingString:report.terminationReason] : @""]);
+    }
     if (report.uncaughtExceptionName) {
         print([NSString stringWithFormat:@"Uncaught:  %@: %@", report.uncaughtExceptionName,
                                          report.uncaughtExceptionReason ?: @""]);
@@ -468,6 +514,177 @@ static int loader(NSString *which) {
     return 2;
 }
 
+// A filter's list for people, or nil without one.
+static NSString *filter_list(NSDictionary *filter, NSString *key) {
+    id list = filter[key];
+    if (![list isKindOfClass:[NSArray class]] || ![list count]) {
+        return nil;
+    }
+    NSMutableArray<NSString *> *items = [NSMutableArray array];
+    for (id item in list) {
+        if ([item isKindOfClass:[NSString class]]) {
+            [items addObject:item];
+        }
+    }
+    return items.count ? [items componentsJoinedByString:@", "] : nil;
+}
+
+// The processes a tweak runs in, kept short when there are many: the ones its
+// filter names first, then the latest started, which are the ones just
+// opened. The set is in the order the processes started.
+static NSString *running_list(NSOrderedSet<NSString *> *where, NSArray *executables) {
+    enum { shown = 10 };
+    if (!where.count) {
+        return @"no running process";
+    }
+    if (where.count <= shown) {
+        return [where.array componentsJoinedByString:@", "];
+    }
+    NSMutableOrderedSet<NSString *> *picked = [NSMutableOrderedSet orderedSet];
+    for (id name in executables) {
+        if ([name isKindOfClass:[NSString class]] && [where containsObject:name]) {
+            [picked addObject:name];
+        }
+    }
+    for (NSString *name in where.array.reverseObjectEnumerator) {
+        if (picked.count >= shown) {
+            break;
+        }
+        [picked addObject:name];
+    }
+    return [NSString stringWithFormat:@"%lu processes, among them %@ and %lu more (burrowctl loaded NAME checks one)",
+                                      (unsigned long)where.count, [picked.array componentsJoinedByString:@", "],
+                                      (unsigned long)(where.count - picked.count)];
+}
+
+// Every tweak: what it is for, where it runs now, its crashes, and whether
+// Safe Mode or the settings turned it off. The compatibility gate's table.
+static int tweaks_report(BurrowServicePaths *paths) {
+    NSFileManager *files = [NSFileManager defaultManager];
+    NSString *directory = paths.tweakDirectories.firstObject;
+    NSMutableArray<NSString *> *names = [NSMutableArray array];
+    for (NSString *file in [[files contentsOfDirectoryAtPath:directory error:NULL]
+             sortedArrayUsingSelector:@selector(caseInsensitiveCompare:)]) {
+        if (![file hasPrefix:@"."] && [file.pathExtension isEqualToString:@"dylib"]) {
+            [names addObject:file.stringByDeletingPathExtension];
+        }
+    }
+    // Where each tweak runs now.
+    NSMutableDictionary<NSString *, NSMutableOrderedSet<NSString *> *> *running = [NSMutableDictionary dictionary];
+    NSDictionary<NSNumber *, NSString *> *processes = BurrowRunningProcesses();
+    NSDictionary<NSString *, NSArray<NSString *> *> *links = linked_tweaks(directory);
+    NSUInteger unread = 0;
+    for (NSNumber *pid in [processes.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
+        NSArray<NSString *> *mapped = BurrowMappedFiles(pid.intValue);
+        if (!mapped) {
+            unread++;
+            continue;
+        }
+        for (NSString *file in mapped) {
+            for (NSString *tweak in tweaks_of_mapped(file, links)) {
+                NSMutableOrderedSet<NSString *> *where =
+                    running[tweak] ?: (running[tweak] = [NSMutableOrderedSet orderedSet]);
+                [where addObject:processes[pid]];
+            }
+        }
+    }
+    // The crash log, per tweak to blame.
+    NSMutableDictionary<NSString *, NSMutableArray<NSDictionary *> *> *crashes = [NSMutableDictionary dictionary];
+    for (NSDictionary *entry in crash_entries(paths)) {
+        NSString *tweak = entry[BurrowCrashLogTweak];
+        if ([tweak isKindOfClass:[NSString class]]) {
+            NSMutableArray<NSDictionary *> *list = crashes[tweak] ?: (crashes[tweak] = [NSMutableArray array]);
+            [list addObject:entry];
+        }
+    }
+    NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:paths.settingsPath];
+    NSArray *disabled = [settings[@"DisabledTweaks"] isKindOfClass:[NSArray class]] ? settings[@"DisabledTweaks"] : @[];
+    NSDictionary *perProcess =
+        [settings[@"DisabledInProcesses"] isKindOfClass:[NSDictionary class]] ? settings[@"DisabledInProcesses"] : @{};
+    BurrowPackageIndex *packages = [[BurrowPackageIndex alloc] initWithDpkgDirectory:paths.dpkgDirectory];
+    NSArray<NSString *> *engineNames =
+        @[ @"CydiaSubstrate", @"libsubstrate.dylib", @"libhooker.dylib", @"libblackjack.dylib", @"libellekit.dylib" ];
+
+    NSUInteger runningCount = 0, crashedCount = 0, crashedSinceCount = 0, offCount = 0;
+    NSDate *loaderSince = BurrowLoaderActiveSince();
+    for (NSString *tweak in names) {
+        NSString *path = [directory stringByAppendingPathComponent:[tweak stringByAppendingPathExtension:@"dylib"]];
+        NSDictionary *package = [packages packageForLibrary:path];
+        NSString *packageText = package ? [NSString stringWithFormat:@"%@ %@", package[BurrowPackageIdentifier] ?: @"?",
+                                                                   package[BurrowPackageVersion] ?: @"?"]
+                                        : @"no package";
+        BOOL engine = BurrowImportedSymbols(path, engineNames).count > 0;
+        print([NSString stringWithFormat:@"%@  (%@; %@)", tweak, packageText,
+                                         engine ? @"hooks through the engine" : @"does not link the engine"]);
+        NSDictionary *plist =
+            [NSDictionary dictionaryWithContentsOfFile:[directory stringByAppendingPathComponent:[tweak stringByAppendingPathExtension:@"plist"]]];
+        NSDictionary *filter = [plist[@"Filter"] isKindOfClass:[NSDictionary class]] ? plist[@"Filter"] : @{};
+        NSMutableArray<NSString *> *targets = [NSMutableArray array];
+        for (NSString *key in @[ @"Executables", @"Bundles", @"Classes" ]) {
+            NSString *list = filter_list(filter, key);
+            if (list) {
+                [targets addObject:[NSString stringWithFormat:@"%@ %@", key.lowercaseString, list]];
+            }
+        }
+        print([NSString stringWithFormat:@"  for:        %@", targets.count ? [targets componentsJoinedByString:@"; "] : @"nothing (no filter)"]);
+        NSOrderedSet<NSString *> *where = running[tweak];
+        runningCount += where.count > 0;
+        id executables = filter[@"Executables"];
+        print([NSString stringWithFormat:@"  running in: %@",
+                                         running_list(where, [executables isKindOfClass:[NSArray class]] ? executables : @[])]);
+        NSArray<NSDictionary *> *its = crashes[tweak];
+        crashedCount += its.count > 0;
+        NSMutableString *crashText = [NSMutableString stringWithString:@"none"];
+        if (its.count) {
+            [crashText setString:[NSString stringWithFormat:@"%lu, last %@ in %@", (unsigned long)its.count,
+                                                           format_date(its.lastObject[BurrowCrashLogDate]),
+                                                           its.lastObject[BurrowCrashLogProcess]]];
+            // The gate counts the crashes under Burrow's loader; older ones
+            // happened under ElleKit's.
+            if (loaderSince) {
+                NSUInteger since = 0;
+                for (NSDictionary *entry in its) {
+                    NSDate *date = entry[BurrowCrashLogDate];
+                    since += [date isKindOfClass:[NSDate class]] && [date compare:loaderSince] != NSOrderedAscending;
+                }
+                crashedSinceCount += since > 0;
+                [crashText appendFormat:@"; %@ since Burrow's loader took over",
+                                        since ? [NSString stringWithFormat:@"%lu", (unsigned long)since] : @"none"];
+            }
+        }
+        print([NSString stringWithFormat:@"  crashes:    %@", crashText]);
+        NSMutableArray<NSString *> *off = [NSMutableArray array];
+        if ([disabled containsObject:tweak]) {
+            [off addObject:@"everywhere"];
+        }
+        for (NSString *process in [perProcess.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
+            id list = perProcess[process];
+            if ([list isKindOfClass:[NSArray class]] && ([list containsObject:tweak] || [list containsObject:@"*"])) {
+                [off addObject:process];
+            }
+        }
+        offCount += off.count > 0;
+        if (off.count) {
+            print([NSString stringWithFormat:@"  turned off: in %@ (burrowctl enable %@ turns it back on)",
+                                             [off componentsJoinedByString:@", "], tweak]);
+        }
+    }
+    NSString *crashSummary = [NSString stringWithFormat:@"%lu with crashes", (unsigned long)crashedCount];
+    if (loaderSince) {
+        crashSummary = [crashSummary stringByAppendingFormat:@" (%lu since Burrow's loader took over on %@)",
+                                                             (unsigned long)crashedSinceCount, format_date(loaderSince)];
+    }
+    print([NSString stringWithFormat:@"%lu tweaks: %lu running now, %lu not running (open what they are for), "
+                                     @"%@, %lu turned off somewhere",
+                                     (unsigned long)names.count, (unsigned long)runningCount,
+                                     (unsigned long)(names.count - runningCount), crashSummary, (unsigned long)offCount]);
+    if (unread) {
+        print([NSString stringWithFormat:@"%lu processes could not be read; run burrowctl as root to see them all.",
+                                         (unsigned long)unread]);
+    }
+    return 0;
+}
+
 static int engine(NSString *which) {
     if (geteuid() != 0) {
         print(@"Switching the hooking engine needs root.");
@@ -594,10 +811,13 @@ int main(int argc, char **argv) {
             return why(paths, @(argv[2]));
         }
         if ([command isEqualToString:@"loaded"] && argc == 3) {
-            return loaded(@(argv[2]));
+            return loaded(@(argv[2]), paths.tweakDirectories.firstObject);
         }
         if ([command isEqualToString:@"enable"] && (argc == 3 || argc == 4)) {
             return enable(paths, @(argv[2]), argc == 4 ? @(argv[3]) : nil);
+        }
+        if ([command isEqualToString:@"tweaks"] && argc == 2) {
+            return tweaks_report(paths);
         }
         if ([command isEqualToString:@"engine"] && argc == 3) {
             int result = engine(@(argv[2]));
@@ -612,7 +832,7 @@ int main(int argc, char **argv) {
             }
         }
         fprintf(stderr, "usage: burrowctl status | crashes [count] | events | enable TWEAK [PROCESS] | check | "
-                        "why NAME|FILE | loaded NAME | loader burrow|ellekit | engine burrow|ellekit\n");
+                        "why NAME|FILE | loaded NAME | tweaks | loader burrow|ellekit | engine burrow|ellekit\n");
         return 2;
     }
 }

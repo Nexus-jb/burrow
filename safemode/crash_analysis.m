@@ -140,7 +140,9 @@ static BOOL crashed_in_loader(BurrowCrashReport *report) {
 // What happened, without where.
 static NSString *what_happened(BurrowCrashReport *report) {
     NSString *what;
-    if (report.uncaughtExceptionName.length) {
+    if (report.isWatchdogKill) {
+        what = @"killed by the watchdog for not responding";
+    } else if (report.uncaughtExceptionName.length) {
         what = report.uncaughtExceptionReason.length
                    ? [NSString stringWithFormat:@"uncaught %@ (%@)", report.uncaughtExceptionName,
                                                 report.uncaughtExceptionReason]
