@@ -108,6 +108,19 @@ static void test_fixtures(NSString *fixtures, NSString *scratch) {
     NSString *malformed = [fixtures stringByAppendingPathComponent:@"malformed.ips"];
     CHECK([BurrowCrashReport reportWithContentsOfFile:malformed error:NULL] == nil);
     CHECK(segv.burrowLoadingTweak == nil);
+    CHECK(!segv.isWatchdogKill && segv.terminationCode == nil);
+
+    // A watchdog kill: no thread marked, the main thread stuck under a tweak.
+    BurrowCrashReport *watchdog = fixture(fixtures, @"watchdog.ips");
+    CHECK(watchdog.isCrash && watchdog.isWatchdogKill);
+    CHECK([watchdog.terminationNamespace isEqualToString:@"FRONTBOARD"]);
+    CHECK([watchdog.terminationReason hasPrefix:@"scene-create watchdog transgression"]);
+    CHECK(watchdog.crashedThreadFrames.count == 6);
+    BurrowCrashAnalysis *hang = [[[BurrowCrashAnalyzer alloc]
+        initWithTweakDirectories:@[ @"/var/jb/usr/lib/TweakInject", [RealRoot stringByAppendingString:@"/usr/lib/TweakInject"] ]
+                  jailbreakRoots:@[ @"/var/jb", RealRoot ]] analyzeReport:watchdog];
+    CHECK([hang.culprit isEqualToString:@"Hangs"]);
+    CHECK([hang.reason hasPrefix:@"killed by the watchdog for not responding in Hangs.dylib"]);
 
     // A crash in the Objective-C runtime while Burrow's loader opened a
     // tweak: the loader names the thread after it.

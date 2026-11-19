@@ -76,6 +76,9 @@ static NSUUID *uuid_value(NSDictionary *dictionary, NSString *key) {
 @property (nonatomic, readwrite, copy, nullable) NSDate *date;
 @property (nonatomic, readwrite, copy, nullable) NSString *exceptionType;
 @property (nonatomic, readwrite, copy, nullable) NSString *signalName;
+@property (nonatomic, readwrite, copy, nullable) NSString *terminationNamespace;
+@property (nonatomic, readwrite, nullable) NSNumber *terminationCode;
+@property (nonatomic, readwrite, copy, nullable) NSString *terminationReason;
 @property (nonatomic, readwrite, copy, nullable) NSString *exceptionSubtype;
 @property (nonatomic, readwrite, copy, nullable) NSString *uncaughtExceptionName;
 @property (nonatomic, readwrite, copy, nullable) NSString *uncaughtExceptionReason;
@@ -161,6 +164,11 @@ static NSUUID *uuid_value(NSDictionary *dictionary, NSString *key) {
     report.exceptionType = string_value(exception, @"type");
     report.signalName = string_value(exception, @"signal");
     report.exceptionSubtype = string_value(exception, @"subtype");
+    NSDictionary *termination = typed(body[@"termination"], [NSDictionary class]);
+    report.terminationNamespace = string_value(termination, @"namespace");
+    report.terminationCode = number_value(termination, @"code");
+    NSArray *reasons = typed(termination[@"reasons"], [NSArray class]);
+    report.terminationReason = typed(reasons.firstObject, [NSString class]);
     // Newer reports describe an uncaught exception in exceptionReason;
     // older ones only in the application specific information.
     NSDictionary *reason = typed(body[@"exceptionReason"], [NSDictionary class]);
@@ -192,6 +200,11 @@ static NSUUID *uuid_value(NSDictionary *dictionary, NSString *key) {
         if ([number_value(thread, @"triggered") boolValue]) {
             crashed = thread;
         }
+    }
+    // A watchdog kill marks no thread; the main thread, the first, is the
+    // one that stopped responding.
+    if (!crashed && report.isWatchdogKill && threads.count) {
+        crashed = typed(threads.firstObject, [NSDictionary class]);
     }
     report.crashedThreadFrames = [report framesFrom:typed(crashed[@"frames"], [NSArray class])];
     report.crashedThreadName = string_value(crashed, @"name");
@@ -225,6 +238,10 @@ static NSUUID *uuid_value(NSDictionary *dictionary, NSString *key) {
 
 // CoreFoundation records "*** Terminating app due to uncaught exception
 // 'Name', reason: 'Reason'" in the application specific information.
+- (BOOL)isWatchdogKill {
+    return self.terminationCode.unsignedLongLongValue == 0x8badf00dULL;
+}
+
 - (void)readUncaughtException:(NSDictionary *)information {
     for (id lines in information.allValues) {
         for (id line in typed(lines, [NSArray class])) {

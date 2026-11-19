@@ -1,0 +1,130 @@
+{"app_name":"Example","timestamp":"2026-11-17 21:20:00.00 -0500","app_version":"1.0","bug_type":"309","os_version":"iPhone OS 16.3.1 (20D67)","name":"Example","incident_id":"22222222-0000-0000-0000-000000000008","bundleID":"com.example.app","slice_uuid":"00000000-0000-0000-0000-000000000130"}
+{
+  "procName": "Example",
+  "procPath": "/private/var/containers/Bundle/Application/5E6F/Example.app/Example",
+  "captureTime": "2026-11-17 21:20:00.0000 -0500",
+  "modelCode": "iPhone15,3",
+  "exception": {
+    "type": "EXC_CRASH",
+    "signal": "SIGKILL"
+  },
+  "termination": {
+    "flags": 6,
+    "code": 2343432205,
+    "namespace": "FRONTBOARD",
+    "indicator": "0x8badf00d",
+    "reasons": [
+      "scene-create watchdog transgression: application<com.example.app>:1234 exhausted real (wall clock) time allowance of 19.70 seconds"
+    ]
+  },
+  "threads": [
+    {
+      "queue": "com.apple.main-thread",
+      "frames": [
+        {
+          "imageOffset": 3000,
+          "imageIndex": 1,
+          "symbol": "mach_msg2_trap",
+          "symbolLocation": 8
+        },
+        {
+          "imageOffset": 4000,
+          "imageIndex": 2,
+          "symbol": "_dispatch_sync_f_slow",
+          "symbolLocation": 500
+        },
+        {
+          "imageOffset": 5000,
+          "imageIndex": 3,
+          "symbol": "-[UIScreen _capabilities]",
+          "symbolLocation": 40
+        },
+        {
+          "imageOffset": 6000,
+          "imageIndex": 4,
+          "symbol": "hangs_knob_check",
+          "symbolLocation": 12
+        },
+        {
+          "imageOffset": 7000,
+          "imageIndex": 5,
+          "symbol": "dlopen_from",
+          "symbolLocation": 8
+        },
+        {
+          "imageOffset": 16,
+          "imageIndex": 0
+        }
+      ]
+    },
+    {
+      "frames": [
+        {
+          "imageOffset": 3000,
+          "imageIndex": 1,
+          "symbol": "mach_msg2_trap",
+          "symbolLocation": 8
+        }
+      ]
+    }
+  ],
+  "usedImages": [
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4295000000,
+      "size": 65536,
+      "uuid": "00000000-0000-0000-0000-000000000130",
+      "path": "/private/var/containers/Bundle/Application/5E6F/Example.app/Example",
+      "name": "Example"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4295065536,
+      "size": 65536,
+      "uuid": "00000000-0000-0000-0000-000000000131",
+      "path": "/usr/lib/system/libsystem_kernel.dylib",
+      "name": "libsystem_kernel.dylib"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4295131072,
+      "size": 65536,
+      "uuid": "00000000-0000-0000-0000-000000000132",
+      "path": "/usr/lib/system/libdispatch.dylib",
+      "name": "libdispatch.dylib"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4295196608,
+      "size": 65536,
+      "uuid": "00000000-0000-0000-0000-000000000133",
+      "path": "/System/Library/PrivateFrameworks/UIKitCore.framework/UIKitCore",
+      "name": "UIKitCore"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4295262144,
+      "size": 65536,
+      "uuid": "00000000-0000-0000-0000-000000000134",
+      "path": "/private/preboot/0A1B2C/dopamine-XYZ/procursus/usr/lib/TweakInject/Hangs.dylib",
+      "name": "Hangs.dylib"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4295327680,
+      "size": 65536,
+      "uuid": "00000000-0000-0000-0000-000000000135",
+      "path": "/usr/lib/dyld",
+      "name": "dyld"
+    }
+  ],
+  "bundleInfo": {
+    "CFBundleIdentifier": "com.example.app"
+  }
+}
