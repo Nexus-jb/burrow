@@ -156,6 +156,36 @@ burrowd guards the switch and goes back to ElleKit's loader by itself
 `burrowctl status` shows the loader, the trial and the guard's reason when
 it went back. Removing the package goes back to ElleKit's loader first.
 
+The hooking engine switches the same way, after the loader: `burrowctl
+engine burrow` diverts each of ElleKit's links to its engine that is there,
+`/var/jb/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate` and
+`libsubstrate.dylib`, `libhooker.dylib` and `libblackjack.dylib` in
+`/var/jb/usr/lib`, to a name with `.ellekit` in it, and links each to
+`/var/jb/usr/lib/burrow/CydiaSubstrate.framework/CydiaSubstrate`: all of
+them or none. `libsubstitute` stays ElleKit's, since Burrow does not
+provide its interface. Tweaks that are already running keep the engine
+they loaded. The engine's guard, with its own 15 minute trial, goes back to
+ElleKit's engine:
+
+- at any time, when a process crashes with Burrow's engine on the crashed
+  thread and no tweak to blame;
+- during the trial, when a process crashes outside any image, as in the
+  trampoline of a hook, or when SpringBoard crashes twice.
+
+Before switching, `burrowctl check` reads the symbols each tweak, and each
+library it loads, imports from the engine's libraries, and looks each one
+up in Burrow's engine.
+
+Device results of the engine switch:
+
+| Device | Chip | iOS | Jailbreak | Build | Result |
+| ------ | ---- | --- | --------- | ----- | ------ |
+| iPhone 14 Pro Max | A16 | 16.3.1 | Dopamine, rootless, Burrow's loader | 0.0.0~dev.79 | `burrowctl check`: 20 tweaks; 14 of them import 4 symbols from the engine, and Burrow's engine has all four |
+| iPhone 14 Pro Max | A16 | 16.3.1 | Dopamine, rootless, Burrow's loader | 0.0.0~dev.80 | `burrowctl engine burrow` and a respring: SpringBoard ran, and the trial ended without the guard going back |
+| iPhone 14 Pro Max | A16 | 16.3.1 | Dopamine, rootless, Burrow's loader and engine | 0.0.0~dev.81 | `burrowctl loaded SpringBoard` after a respring: Burrow's engine mapped, with the ten tweaks, eight of which link the engine. Before the respring it showed no engine: the package had been reinstalled while SpringBoard ran, and a replaced file has no path left in the process, which `loaded` now explains |
+| iPhone 14 Pro Max | A16 | 16.3.1 | Dopamine, rootless, Burrow's loader and engine | 0.0.0~dev.81 | Settings ran with Burrow's engine and PreferenceLoader, and showed the tweaks' settings; MessageDateTime worked in Messages |
+| iPhone 14 Pro Max | A16 | 16.3.1 | Dopamine, rootless, Burrow's loader and engine | 0.0.0~dev.82 | `burrow-tests`: every suite passed for arm64 and arm64e (loader 33, Safe Mode 171) |
+
 Device results of the switch:
 
 | Device | Chip | iOS | Jailbreak | Build | Result |

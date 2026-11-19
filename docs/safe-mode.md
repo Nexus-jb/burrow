@@ -167,7 +167,9 @@ burrowctl loaded NAME  the tweak loader, hooking engine and tweaks in the
                        running process NAME. Burrow's loader is not mapped
                        once the jailbreak closes it; a process started after
                        the switch is shown as loaded by it
-burrowctl check        the tweaks and the libraries they load that use the
+burrowctl check        the hooking engine's symbols the tweaks and their
+                       libraries use, and whether Burrow's engine has them;
+                       the tweaks and the libraries they load that use the
                        old arm64e ABI, whether ElleKit's OldABI shim is
                        installed, the tweaks with a CoreFoundationVersion
                        range, and the tweak managers

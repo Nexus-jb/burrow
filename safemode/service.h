@@ -39,6 +39,17 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly, copy, nullable) NSString *guardReason;
 - (void)resetGuard;
 
+// The same for the hooking engine, after Burrow's engine takes over: from
+// engineGuardSince on, a crash inside Burrow's engine with no tweak to
+// blame, in any process, sets engineGuardReason; and before
+// engineTrialUntil, so does a crash in code outside any image, as in a
+// hook's trampoline, or SpringBoard crashing twice. The owner of the service
+// then returns to the jailbreak's own engine.
+@property (nonatomic, copy, nullable) NSDate *engineGuardSince;
+@property (nonatomic, copy, nullable) NSDate *engineTrialUntil;
+@property (nonatomic, readonly, copy, nullable) NSString *engineGuardReason;
+- (void)resetEngineGuard;
+
 // Handles every report not seen before. Returns how many it handled.
 - (NSUInteger)scan;
 

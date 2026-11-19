@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Switches the system's tweak loader between ElleKit's and Burrow's.
+// Switches the system's tweak loader, and its hooking engine, between
+// ElleKit's and Burrow's.
 //
 // Dopamine loads /var/jb/usr/lib/TweakLoader.dylib into every new process,
 // and the ElleKit package owns that file. To use Burrow's loader, the file
@@ -27,6 +28,16 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (BOOL)useBurrowLoader:(NSError **)error;
 - (BOOL)useElleKitLoader:(NSError **)error;
+
+// The hooking engine works the same way with the files ElleKit's package
+// links to its engine: CydiaSubstrate.framework, libsubstrate, libhooker
+// and libblackjack. Each one there is diverted and linked to Burrow's
+// engine, all of them or none. libsubstitute stays ElleKit's.
+// "Burrow", "ElleKit", "mixed", "none" or a path.
+- (NSString *)engineOwner;
+
+- (BOOL)useBurrowEngine:(NSError **)error;
+- (BOOL)useElleKitEngine:(NSError **)error;
 
 @end
 

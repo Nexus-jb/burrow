@@ -1,0 +1,60 @@
+{"app_name":"Preferences","timestamp":"2026-11-17 21:11:00.00 -0500","bug_type":"309","os_version":"iPhone OS 16.3.1 (20D67)","name":"Preferences","incident_id":"22222222-0000-0000-0000-000000000007","slice_uuid":"00000000-0000-0000-0000-000000000110","bundleID":"com.apple.Preferences"}
+{
+  "procName": "Preferences",
+  "procPath": "/Applications/Preferences.app/Preferences",
+  "captureTime": "2026-11-17 21:11:00.0000 -0500",
+  "exception": {
+    "type": "EXC_BAD_ACCESS",
+    "signal": "SIGSEGV"
+  },
+  "faultingThread": 0,
+  "threads": [
+    {
+      "triggered": true,
+      "frames": [
+        {
+          "imageOffset": 4300000000,
+          "imageIndex": 1
+        },
+        {
+          "imageOffset": 512,
+          "imageIndex": 2,
+          "symbol": "-[UIView layoutSubviews]",
+          "symbolLocation": 40
+        },
+        {
+          "imageOffset": 16,
+          "imageIndex": 0
+        }
+      ]
+    }
+  ],
+  "usedImages": [
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 4295655424,
+      "size": 65536,
+      "uuid": "00000000-0000-0000-0000-000000000110",
+      "path": "/Applications/Preferences.app/Preferences",
+      "name": "Preferences"
+    },
+    {
+      "source": "A",
+      "base": 0,
+      "size": 0
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 6000000000,
+      "size": 65536,
+      "uuid": "00000000-0000-0000-0000-000000000113",
+      "path": "/System/Library/PrivateFrameworks/UIKitCore.framework/UIKitCore",
+      "name": "UIKitCore"
+    }
+  ],
+  "bundleInfo": {
+    "CFBundleIdentifier": "com.apple.Preferences"
+  }
+}

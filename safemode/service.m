@@ -49,6 +49,8 @@ static NSArray<NSString *> *with_real_path(NSString *path) {
     NSUInteger _crashes;
     NSUInteger _springBoardCrashes;
     NSString *_guardReason;
+    NSUInteger _engineSpringBoardCrashes;
+    NSString *_engineGuardReason;
     NSMutableDictionary<NSString *, NSNumber *> *_directories;
 }
 
@@ -69,6 +71,54 @@ static NSArray<NSString *> *with_real_path(NSString *path) {
 - (void)resetGuard {
     _guardReason = nil;
     _springBoardCrashes = 0;
+}
+
+- (NSString *)engineGuardReason {
+    return _engineGuardReason;
+}
+
+- (void)resetEngineGuard {
+    _engineGuardReason = nil;
+    _engineSpringBoardCrashes = 0;
+}
+
+static BOOL in_burrows_engine(BurrowCrashFrame *frame) {
+    NSString *name = frame.image.name ?: frame.image.path.lastPathComponent;
+    return [name isEqualToString:@"CydiaSubstrate"] &&
+           (!frame.image.path.length || [frame.image.path containsString:@"/burrow/CydiaSubstrate.framework/"]);
+}
+
+// Crash reports list code outside any image under an image with neither a
+// name nor a path.
+static BOOL outside_images(BurrowCrashFrame *frame) {
+    return !frame.image || (!frame.image.name.length && !frame.image.path.length);
+}
+
+- (void)engineGuardReport:(BurrowCrashReport *)report analyzer:(BurrowCrashAnalyzer *)analyzer {
+    if (!self.engineGuardSince || !report.date ||
+        [report.date compare:self.engineGuardSince] != NSOrderedDescending || _engineGuardReason) {
+        return;
+    }
+    for (BurrowCrashFrame *frame in report.crashedThreadFrames) {
+        if (in_burrows_engine(frame) && ![analyzer analyzeReport:report].culprit) {
+            _engineGuardReason =
+                [NSString stringWithFormat:@"%@ crashed inside Burrow's hooking engine", report.processName];
+            return;
+        }
+    }
+    BOOL trial = self.engineTrialUntil && [report.date compare:self.engineTrialUntil] != NSOrderedDescending;
+    if (trial && report.crashedThreadFrames.count && outside_images(report.crashedThreadFrames.firstObject)) {
+        _engineGuardReason = [NSString
+            stringWithFormat:@"%@ crashed outside any image, as in a hook's trampoline, soon after Burrow's engine took over",
+                             report.processName];
+        return;
+    }
+    if (trial && [report.processName isEqualToString:@"SpringBoard"] &&
+        ++_engineSpringBoardCrashes >= GuardSpringBoardCrashes) {
+        _engineGuardReason =
+            [NSString stringWithFormat:@"SpringBoard crashed %lu times soon after Burrow's engine took over",
+                                       (unsigned long)_engineSpringBoardCrashes];
+    }
 }
 
 - (void)guardReport:(BurrowCrashReport *)report analyzer:(BurrowCrashAnalyzer *)analyzer {
@@ -152,6 +202,7 @@ static NSArray<NSString *> *with_real_path(NSString *path) {
             }
             _crashes++;
             [self guardReport:report analyzer:analyzer];
+            [self engineGuardReport:report analyzer:analyzer];
             NSError *error = nil;
             NSDictionary *entry = nil;
             if (![log recordReport:report data:data name:path.lastPathComponent entry:&entry error:&error]) {

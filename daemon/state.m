@@ -16,6 +16,8 @@ NSString *const BurrowDaemonPIDPath = @"/var/jb/var/lib/burrow/burrowd.pid";
 NSString *const BurrowDaemonStatisticsPath = @"/var/jb/var/lib/burrow/burrowd.plist";
 NSString *const BurrowTrialPath = @"/var/jb/var/lib/burrow/trial.plist";
 NSString *const BurrowGuardPath = @"/var/jb/var/lib/burrow/guard.plist";
+NSString *const BurrowEngineTrialPath = @"/var/jb/var/lib/burrow/engine-trial.plist";
+NSString *const BurrowEngineGuardPath = @"/var/jb/var/lib/burrow/engine-guard.plist";
 const NSTimeInterval BurrowTrialLength = 15 * 60;
 
 static NSString *real_path(NSString *path) {
@@ -45,6 +47,17 @@ NSDate *BurrowLoaderActiveSince(void) {
     }
     struct stat info;
     if (lstat(BurrowSystemLoaderPath.fileSystemRepresentation, &info) != 0) {
+        return nil;
+    }
+    return [NSDate dateWithTimeIntervalSince1970:(NSTimeInterval)info.st_mtimespec.tv_sec];
+}
+
+NSDate *BurrowEngineActiveSince(void) {
+    if (![BurrowOwnerOfFile(BurrowSystemEnginePath) isEqualToString:@"Burrow"]) {
+        return nil;
+    }
+    struct stat info;
+    if (lstat(BurrowSystemEnginePath.fileSystemRepresentation, &info) != 0) {
         return nil;
     }
     return [NSDate dateWithTimeIntervalSince1970:(NSTimeInterval)info.st_mtimespec.tv_sec];

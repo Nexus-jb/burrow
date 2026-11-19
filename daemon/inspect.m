@@ -5,6 +5,7 @@
 #include <libkern/OSByteOrder.h>
 #include <mach-o/fat.h>
 #include <mach-o/loader.h>
+#include <mach-o/nlist.h>
 #include <fcntl.h>
 #include <stddef.h>
 #include <string.h>
@@ -262,7 +263,9 @@ static BOOL slice_offset(int fd, uint64_t *offset) {
     return found;
 }
 
-static NSData *read_load_commands(NSString *path, uint32_t *count) {
+// Reads the load commands of the slice slice_offset picks; with fd_out and
+// slice_out, leaves the file open for the caller to read more of it.
+static NSData *read_slice_commands(NSString *path, uint32_t *count, int *fd_out, uint64_t *slice_out) {
     int fd = open(path.fileSystemRepresentation, O_RDONLY);
     if (fd < 0) {
         return nil;
@@ -283,8 +286,17 @@ static NSData *read_load_commands(NSString *path, uint32_t *count) {
             }
         }
     }
-    close(fd);
+    if (commands && fd_out && slice_out) {
+        *fd_out = fd;
+        *slice_out = offset;
+    } else {
+        close(fd);
+    }
     return commands;
+}
+
+static NSData *read_load_commands(NSString *path, uint32_t *count) {
+    return read_slice_commands(path, count, NULL, NULL);
 }
 
 // The string a load command points to, if it ends inside the command.
@@ -384,4 +396,74 @@ NSArray<NSString *> *BurrowJailbreakLibraries(NSString *path, NSArray<NSString *
     collect_libraries(path, @[], roots, found, 0);
     [found removeObject:path];
     return found.array;
+}
+
+NSDictionary<NSString *, NSArray<NSString *> *> *BurrowImportedSymbols(NSString *path,
+                                                                       NSArray<NSString *> *libraryNames) {
+    uint32_t count = 0;
+    int fd = -1;
+    uint64_t slice = 0;
+    NSData *commands = read_slice_commands(path, &count, &fd, &slice);
+    if (!commands) {
+        return @{};
+    }
+    // Libraries in load order, for the ordinals in the symbols' n_desc.
+    NSMutableArray<NSString *> *libraries = [NSMutableArray array];
+    struct symtab_command symtab = { 0 };
+    size_t cursor = 0;
+    for (uint32_t i = 0; i < count && cursor + 8 <= commands.length; i++) {
+        uint32_t words[3] = { 0 };
+        memcpy(words, (const uint8_t *)commands.bytes + cursor, MIN(sizeof words, commands.length - cursor));
+        uint32_t cmd = words[0], size = words[1];
+        if (size < 8 || cursor + size > commands.length) {
+            break;
+        }
+        if (cmd == LC_LOAD_DYLIB || cmd == LC_LOAD_WEAK_DYLIB || cmd == LC_REEXPORT_DYLIB ||
+            cmd == LC_LOAD_UPWARD_DYLIB || cmd == LC_LAZY_LOAD_DYLIB) {
+            NSString *name = size >= 12 ? command_string(commands, cursor, size, words[2]) : nil;
+            [libraries addObject:name ?: @""];
+        } else if (cmd == LC_SYMTAB && size >= sizeof symtab) {
+            memcpy(&symtab, (const uint8_t *)commands.bytes + cursor, sizeof symtab);
+        }
+        cursor += size;
+    }
+    NSMutableDictionary<NSString *, NSMutableArray<NSString *> *> *imports = [NSMutableDictionary dictionary];
+    if (symtab.nsyms && symtab.nsyms <= (1u << 20) && symtab.strsize <= (32u << 20)) {
+        NSData *symbols = read_at(fd, slice + symtab.symoff, (size_t)symtab.nsyms * sizeof(struct nlist_64));
+        NSData *strings = read_at(fd, slice + symtab.stroff, symtab.strsize);
+        const struct nlist_64 *entries = symbols.bytes;
+        for (uint32_t i = 0; strings && i < symbols.length / sizeof(struct nlist_64); i++) {
+            struct nlist_64 entry;
+            memcpy(&entry, entries + i, sizeof entry);
+            // Undefined external symbols that are not common symbols.
+            if ((entry.n_type & N_TYPE) != N_UNDF || !(entry.n_type & N_EXT) || entry.n_value ||
+                entry.n_un.n_strx >= strings.length) {
+                continue;
+            }
+            unsigned ordinal = (entry.n_desc >> 8) & 0xff;
+            if (ordinal < 1 || ordinal > libraries.count) {
+                continue;
+            }
+            NSString *library = libraries[ordinal - 1];
+            if (![libraryNames containsObject:library.lastPathComponent]) {
+                continue;
+            }
+            const char *name = (const char *)strings.bytes + entry.n_un.n_strx;
+            size_t length = strnlen(name, strings.length - entry.n_un.n_strx);
+            NSString *symbol = [[NSString alloc] initWithBytes:name length:length encoding:NSUTF8StringEncoding];
+            if (!symbol.length) {
+                continue;
+            }
+            // C symbols carry a leading underscore in Mach-O.
+            if ([symbol hasPrefix:@"_"]) {
+                symbol = [symbol substringFromIndex:1];
+            }
+            NSMutableArray<NSString *> *list = imports[library] ?: (imports[library] = [NSMutableArray array]);
+            if (![list containsObject:symbol]) {
+                [list addObject:symbol];
+            }
+        }
+    }
+    close(fd);
+    return imports;
 }
