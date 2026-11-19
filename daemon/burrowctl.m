@@ -8,6 +8,9 @@
 //   burrowctl events          what Safe Mode turned off, and why
 //   burrowctl loaded NAME     the tweak loader, hooking engine and tweaks in
 //                             the running processes called NAME (as root)
+//   burrowctl enable TWEAK [PROCESS]
+//                             turn a tweak Safe Mode turned off back on, in
+//                             PROCESS as Safe Mode named it or everywhere
 //   burrowctl check           the tweaks and libraries that need the old arm64e
 //                             ABI shim and
 //                             whether it is installed, the tweaks no loader
@@ -91,8 +94,12 @@ static int status(BurrowServicePaths *paths) {
                                      (unsigned long)entries.count, (unsigned long)blamed]);
     NSDate *since = BurrowLoaderActiveSince();
     if (since) {
+        NSUInteger off = 0;
+        for (NSDictionary *event in safe_mode_events(paths)) {
+            off += ![event[BurrowSafeModeEventAction] isEqual:@"on"];
+        }
         print([NSString stringWithFormat:@"Safe Mode:       on since %@, %lu tweaks turned off", format_date(since),
-                                         (unsigned long)safe_mode_events(paths).count]);
+                                         (unsigned long)off]);
     } else {
         print(@"Safe Mode:       off until Burrow's loader loads the tweaks");
     }
@@ -383,6 +390,32 @@ static int crashes(BurrowServicePaths *paths, NSUInteger count) {
     return 0;
 }
 
+static int enable(BurrowServicePaths *paths, NSString *tweak, NSString *process) {
+    if (geteuid() != 0) {
+        print(@"Turning a tweak back on needs root.");
+        return 1;
+    }
+    BurrowSafeMode *safe_mode = [[BurrowSafeMode alloc] initWithTweakDirectories:@[]
+                                                                  jailbreakRoots:@[]
+                                                                    settingsPath:paths.settingsPath
+                                                                       statePath:paths.safeModeStatePath];
+    NSError *error = nil;
+    NSArray<NSString *> *changed = [safe_mode turnOnTweak:tweak inProcess:process error:&error];
+    if (!changed) {
+        print([NSString stringWithFormat:@"%@ cannot be turned back on: %@", tweak, error.localizedDescription]);
+        return 1;
+    }
+    if (!changed.count) {
+        print([NSString stringWithFormat:@"%@ is not turned off%@.", tweak,
+                                         process ? [@" in " stringByAppendingString:process] : @""]);
+        return 1;
+    }
+    print([NSString stringWithFormat:@"%@ is back on in %@. It loads when each of them starts again; for "
+                                     @"SpringBoard, run killall SpringBoard.",
+                                     tweak, [changed componentsJoinedByString:@", "]]);
+    return 0;
+}
+
 static int events(BurrowServicePaths *paths) {
     NSArray *list = safe_mode_events(paths);
     if (!list.count) {
@@ -419,14 +452,17 @@ int main(int argc, char **argv) {
         if ([command isEqualToString:@"loaded"] && argc == 3) {
             return loaded(@(argv[2]));
         }
+        if ([command isEqualToString:@"enable"] && (argc == 3 || argc == 4)) {
+            return enable(paths, @(argv[2]), argc == 4 ? @(argv[3]) : nil);
+        }
         if ([command isEqualToString:@"loader"] && argc == 3) {
             int result = loader(@(argv[2]));
             if (result != 2) {
                 return result;
             }
         }
-        fprintf(stderr, "usage: burrowctl status | crashes [count] | events | check | why NAME|FILE | loaded NAME | "
-                        "loader burrow|ellekit\n");
+        fprintf(stderr, "usage: burrowctl status | crashes [count] | events | enable TWEAK [PROCESS] | check | "
+                        "why NAME|FILE | loaded NAME | loader burrow|ellekit\n");
         return 2;
     }
 }

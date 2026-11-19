@@ -189,6 +189,22 @@ static void test_fixtures(NSString *fixtures, NSString *scratch) {
     CHECK([events.firstObject[BurrowSafeModeEventReport] isEqualToString:@"segv.ips"]);
     CHECK([events.lastObject[BurrowSafeModeEventTweak] isEqualToString:@"*"]);
 
+    // Turning tweaks back on, wherever they are off or in one process,
+    // leaves the rest of the settings alone.
+    NSError *enable_error = nil;
+    NSArray<NSString *> *changed = [safe_mode turnOnTweak:@"Foo" inProcess:nil error:&enable_error];
+    CHECK([changed containsObject:@"com.apple.springboard"]);
+    CHECK([read_plist(settings)[@"DisabledInProcesses"][@"com.apple.springboard"] isEqual:@[ @"Baz" ]]);
+    changed = [safe_mode turnOnTweak:@"*" inProcess:@"backboardd" error:&enable_error];
+    CHECK([changed isEqualToArray:@[ @"backboardd" ]]);
+    CHECK(read_plist(settings)[@"DisabledInProcesses"][@"backboardd"] == nil);
+    CHECK([[safe_mode turnOnTweak:@"Bar" inProcess:@"backboardd" error:&enable_error] count] == 0);
+    CHECK([read_plist(settings)[@"DisabledInProcesses"][@"com.example.app"] isEqual:@[ @"Bar" ]]);
+    CHECK([read_plist(settings)[@"DisabledTweaks"] isEqual:@[ @"Old" ]]);
+    NSDictionary *back_on = safe_mode.events.lastObject;
+    CHECK([[BurrowSafeMode describeEvent:back_on]
+        isEqualToString:@"turned every tweak back on in backboardd with burrowctl enable"]);
+
     // Settings that are not valid are left alone.
     NSString *broken = [scratch stringByAppendingPathComponent:@"broken.plist"];
     write_plist(@[ @"not", @"a", @"dictionary" ], broken);

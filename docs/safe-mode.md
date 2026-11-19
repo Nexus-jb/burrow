@@ -95,7 +95,15 @@ turned off every tweak in backboardd: crashed 3 times within 120 seconds, and no
 ```
 
 The events are for the package manager to show, next to a way to turn the
-tweak back on. The last 100 events are kept.
+tweak back on. Until it does, `burrowctl enable TWEAK [PROCESS]` turns a
+tweak back on, in one process as Safe Mode named it or in every process,
+and records that as an event too:
+
+```
+turned Foo back on in com.apple.springboard with burrowctl enable
+```
+
+The last 100 events are kept.
 
 Safe Mode changes the loader settings under an exclusive lock on
 `<settings>.lock`, and anything else that writes them must take the same
@@ -146,6 +154,9 @@ burrowctl status       the tweak loader and hooking engine in use, burrowd,
                        the reports it has read, the crash log and Safe Mode
 burrowctl crashes [N]  the N newest crashes with tweaks loaded (10)
 burrowctl events       what Safe Mode turned off, and why
+burrowctl enable TWEAK [PROCESS]
+                       turn a tweak Safe Mode turned off back on, in
+                       PROCESS or everywhere (root only)
 burrowctl why NAME     the newest crash report of the process NAME, among
                        the system's and the crash log's copies (or a
                        report file): the exception, the tweaks found, the
