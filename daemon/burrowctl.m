@@ -356,7 +356,7 @@ static int loader(NSString *which) {
         }
         print(@"Burrow's loader now loads tweaks into new processes.");
         print([NSString stringWithFormat:@"Until %@, burrowd goes back to ElleKit's loader by itself if SpringBoard "
-                                         @"crashes twice, and at any time if a process crashes inside Burrow's loader.",
+                                         @"crashes twice, and at any time if a process crashes inside Burrow's loader with no tweak to blame.",
                                          format_date(until)]);
         print(@"Respring to load SpringBoard with it: killall SpringBoard");
         return 0;

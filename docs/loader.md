@@ -130,6 +130,40 @@ before the loader only if the process loaded it first.
 A process with no tweaks in the tweak directory costs one directory read:
 the loader returns before it reads any property list.
 
+## Switching from ElleKit's loader
+
+On a jailbreak that uses ElleKit, the Burrow package installs the loader
+beside ElleKit's and changes nothing. As root, `burrowctl loader burrow`
+switches:
+
+- `dpkg-divert --package com.nexusjb.burrow --rename` moves ElleKit's
+  `/var/jb/usr/lib/TweakLoader.dylib` aside to
+  `/var/jb/usr/lib/TweakLoader.ellekit.dylib`, so that an ElleKit update
+  does not put its loader back, and the path becomes a link to
+  `/var/jb/usr/lib/burrow/BurrowLoader.dylib`. The jailbreak loads it into
+  every new process. ElleKit stays the hooking engine.
+- It needs burrowd running, and starts a 15 minute trial.
+
+burrowd guards the switch and goes back to ElleKit's loader by itself
+(`burrowctl loader ellekit` does the same by hand):
+
+- at any time, when a process crashes with Burrow's loader on the crashed
+  thread and no tweak to blame. A crash with a tweak to blame, such as a
+  tweak crashing in its constructor while the loader opens it, is that
+  tweak's, and Safe Mode turns it off instead;
+- during the trial, when SpringBoard crashes twice.
+
+`burrowctl status` shows the loader, the trial and the guard's reason when
+it went back. Removing the package goes back to ElleKit's loader first.
+
+Device results of the switch:
+
+| Device | Chip | iOS | Jailbreak | Build | Result |
+| ------ | ---- | --- | --------- | ----- | ------ |
+| iPhone 14 Pro Max | A16 | 16.3.1 | Dopamine, rootless, ElleKit | 0.0.0~dev.54 | SpringBoard crashed in the Objective-C runtime while Burrow's loader opened a tweak; the guard went back to ElleKit's loader within seconds. The likely cause: a tweak built with the old arm64e ABI, which ElleKit's loader opens the OldABI shim for |
+| iPhone 14 Pro Max | A16 | 16.3.1 | Dopamine, rootless, ElleKit | 0.0.0~dev.68 | After the loader opened the shim like ElleKit's and that tweak was rebuilt with the current ABI, SpringBoard ran with Burrow's loader, with the ten tweaks ElleKit's loader loads into it |
+| iPhone 14 Pro Max | A16 | 16.3.1 | Dopamine, rootless, Burrow's loader | 0.0.0~dev.72 | `burrow-tests probe`: Safe Mode turned the probe tweak off in the probe and `burrowctl enable` turned it back on, but the guard also went back to ElleKit's loader, since the crash had Burrow's loader on the stack. The guard now leaves crashes with a tweak to blame to Safe Mode |
+
 ## Testing
 
 `make test-loader` (macOS) and the device package run `tests/loader_tests.c`.

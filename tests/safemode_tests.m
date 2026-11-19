@@ -372,10 +372,12 @@ static void test_guard(NSString *fixtures, NSString *dpkg, NSString *scratch) {
     add(@"guard-loader.ips");
     [service scan];
     CHECK([service.guardReason isEqualToString:@"Preferences crashed inside Burrow's loader"]);
+    // A crash with a tweak to blame is the tweak's, even with Burrow's loader
+    // on the stack: Safe Mode handles it, and the guard does not go back.
     [service resetGuard];
     add(@"load-crash.ips");
     [service scan];
-    CHECK([service.guardReason isEqualToString:@"SpringBoard crashed while Burrow's loader loaded Gamma"]);
+    CHECK(service.guardReason == nil);
 
     // Crashes from before Burrow's loader took over do not count.
     BurrowService *later = [[BurrowService alloc] initWithPaths:paths];

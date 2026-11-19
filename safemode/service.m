@@ -71,19 +71,18 @@ static NSArray<NSString *> *with_real_path(NSString *path) {
     _springBoardCrashes = 0;
 }
 
-- (void)guardReport:(BurrowCrashReport *)report {
+- (void)guardReport:(BurrowCrashReport *)report analyzer:(BurrowCrashAnalyzer *)analyzer {
     if (!self.guardSince || !report.date || [report.date compare:self.guardSince] != NSOrderedDescending ||
         _guardReason) {
         return;
     }
     for (BurrowCrashFrame *frame in report.crashedThreadFrames) {
         NSString *name = frame.image.name ?: frame.image.path.lastPathComponent;
-        if ([name isEqualToString:@"BurrowLoader.dylib"]) {
-            // Even when a tweak is to blame, a trial crash goes back.
-            _guardReason = report.burrowLoadingTweak
-                               ? [NSString stringWithFormat:@"%@ crashed while Burrow's loader loaded %@",
-                                                            report.processName, report.burrowLoadingTweak]
-                               : [NSString stringWithFormat:@"%@ crashed inside Burrow's loader", report.processName];
+        // A crash with Burrow's loader on the stack and no tweak to blame is
+        // the loader's. One with a tweak to blame, such as a tweak crashing
+        // in its constructor, is the tweak's: Safe Mode turns that tweak off.
+        if ([name isEqualToString:@"BurrowLoader.dylib"] && ![analyzer analyzeReport:report].culprit) {
+            _guardReason = [NSString stringWithFormat:@"%@ crashed inside Burrow's loader", report.processName];
             return;
         }
     }
@@ -152,7 +151,7 @@ static NSArray<NSString *> *with_real_path(NSString *path) {
                 continue;
             }
             _crashes++;
-            [self guardReport:report];
+            [self guardReport:report analyzer:analyzer];
             NSError *error = nil;
             NSDictionary *entry = nil;
             if (![log recordReport:report data:data name:path.lastPathComponent entry:&entry error:&error]) {
