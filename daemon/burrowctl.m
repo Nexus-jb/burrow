@@ -183,9 +183,19 @@ static int loaded(NSString *name) {
             loader = @"Burrow (it loaded the tweaks, then the jailbreak closed it)";
         }
         print([NSString stringWithFormat:@"  loader: %@", loader]);
-        print([NSString stringWithFormat:@"  engine: %@",
-                                         owner_of_mapped(files, @[ @"/burrow/CydiaSubstrate.framework/CydiaSubstrate" ],
-                                                         @[ @"/libellekit.dylib" ])]);
+        NSString *engine = owner_of_mapped(files, @[ @"/burrow/CydiaSubstrate.framework/CydiaSubstrate" ],
+                                           @[ @"/libellekit.dylib" ]);
+        // A file replaced while mapped, as by reinstalling its package, keeps
+        // its old contents in the process but has no path left to show.
+        NSDate *installed = [[NSFileManager defaultManager] attributesOfItemAtPath:BurrowEnginePath
+                                                                             error:NULL][NSFileModificationDate];
+        if ([engine isEqualToString:@"none"] && [BurrowOwnerOfFile(BurrowSystemEnginePath) isEqualToString:@"Burrow"] &&
+            started && installed && [started compare:installed] == NSOrderedAscending) {
+            engine = [NSString stringWithFormat:@"not seen: Burrow's engine was reinstalled at %@, after the process "
+                                                @"started, and a replaced file shows no path; restart the process",
+                                                format_date(installed)];
+        }
+        print([NSString stringWithFormat:@"  engine: %@", engine]);
         print([NSString stringWithFormat:@"  tweaks (%lu): %@", (unsigned long)tweaks.count,
                                          tweaks.count ? [tweaks componentsJoinedByString:@", "] : @"none"]);
         // The jailbreak's other files in the process, under /var/jb.
