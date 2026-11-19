@@ -275,20 +275,16 @@ int main(int argc, char **argv) {
             failures++;
             continue;
         }
-        char variable[64] = "";
+        // The target sets the variable itself before it opens the loader:
+        // Dopamine's spawn hook removes _MSSafeMode and _SafeMode from a new
+        // process's environment (and then injects nothing into it), so they
+        // would never reach the target on the device.
         if (test->environment) {
-            snprintf(variable, sizeof variable, "%s", test->environment);
-            char *equals = strchr(variable, '=');
-            if (equals) {
-                *equals = '\0';
-                setenv(variable, equals + 1, 1);
-            }
+            setenv("BURROW_TEST_SET_VARIABLE", test->environment, 1);
         }
         expect(test->name, "loader-target", plain, loader, test->plain);
         expect(test->name, "LoaderTarget.app", app, loader, test->app);
-        if (variable[0]) {
-            unsetenv(variable);
-        }
+        unsetenv("BURROW_TEST_SET_VARIABLE");
     }
     unlink(settings);
     test_old_abi(loader, scratch);

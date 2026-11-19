@@ -77,7 +77,9 @@ tweak is to be loaded.
 
 When the environment variable `_MSSafeMode` or `_SafeMode` is `1`, the
 convention from Cydia Substrate for starting a process without tweaks, the
-loader loads nothing.
+loader loads nothing. On Dopamine the loader does not see them: its spawn
+hook removes both variables from a new process's environment and injects
+nothing into that process, so no tweak loader runs there at all.
 
 ## Turning tweaks off
 
@@ -143,7 +145,8 @@ filters from `tests/loader/TweakInject`, and two targets:
 
 Each test tweak tells the target when its constructor runs. The test program
 runs both targets under eleven settings files and the two safe mode
-variables, and checks which tweaks loaded and in what order. Among the test tweaks are one with no filter, one with an
+variables, which the target sets itself before it opens the loader since
+Dopamine removes them on spawn, and checks which tweaks loaded and in what order. Among the test tweaks are one with no filter, one with an
 unreadable filter, one with an empty filter, one that is not a library, a
 tweak manager whose name sorts last, a filter matched by either of two
 keys, a bundle identifier in another case, a filter with only
@@ -151,9 +154,9 @@ keys, a bundle identifier in another case, a filter with only
 includes the running version, a stand-in for the old ABI shim, and filters in OpenStep format and with `Mode` set
 to `Any`.
 
-Device results:
+Device results (the 26 checks of 0.0.0~dev.48 ran on CI only):
 
 | Device | Chip | iOS | Jailbreak | Build | Result |
 | ------ | ---- | --- | --------- | ----- | ------ |
 | iPhone 14 Pro Max | A16 (arm64 and arm64e tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.31 | All 20 loader checks passed for both architectures, with every other suite |
-| iPhone 14 Pro Max | A16 (arm64 and arm64e tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.48 | All 26 loader checks passed, with tweak managers and the safe mode variables |
+| iPhone 14 Pro Max | A16 (arm64 and arm64e tests) | 16.3.1 | Dopamine, rootless, Burrow's loader as the tweak loader | 0.0.0~dev.70 | 29 of 33 loader checks passed for both architectures. The four safe mode cases failed because Dopamine removed the variables before the target started; the tests now have the target set them itself |
