@@ -146,7 +146,8 @@ burrowctl status       the tweak loader and hooking engine in use, burrowd,
                        the reports it has read, the crash log and Safe Mode
 burrowctl crashes [N]  the N newest crashes with tweaks loaded (10)
 burrowctl events       what Safe Mode turned off, and why
-burrowctl why NAME     the newest crash report of the process NAME (or a
+burrowctl why NAME     the newest crash report of the process NAME, among
+                       the system's and the crash log's copies (or a
                        report file): the exception, the tweaks found, the
                        one to blame, the tweak Burrow's loader was opening,
                        the images on the stacks that are not Apple's, and

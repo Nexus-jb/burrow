@@ -180,7 +180,11 @@ static int why(BurrowServicePaths *paths, NSString *what) {
     if (![what hasSuffix:@".ips"]) {
         NSDate *newest = nil;
         path = nil;
-        for (NSString *directory in paths.reportDirectories) {
+        // The crash log's copies count too: the system deletes old reports,
+        // and people delete them by hand.
+        NSArray<NSString *> *directories =
+            [paths.reportDirectories arrayByAddingObject:[paths.crashLogDirectory stringByAppendingPathComponent:@"reports"]];
+        for (NSString *directory in directories) {
             for (NSString *name in [files contentsOfDirectoryAtPath:directory error:NULL]) {
                 if (![name hasSuffix:@".ips"] || !([name hasPrefix:[what stringByAppendingString:@"-"]] ||
                                                    [name hasPrefix:[what stringByAppendingString:@"."]])) {
