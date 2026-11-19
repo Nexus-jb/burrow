@@ -86,14 +86,20 @@ Description: Tweak injection platform (development build)
  and "burrowctl loader ellekit" switches back. Run burrowctl status.
 CONTROL
 
+# The preinst refuses chips older than the A12.
+install -m 0755 scripts/preinst.sh "$stage/DEBIAN/preinst"
 cat > "$stage/DEBIAN/postinst" <<'SCRIPT'
 #!/var/jb/bin/sh
 # SPDX-License-Identifier: Apache-2.0
 mkdir -p /var/jb/var/lib/burrow/crashes /var/jb/etc/burrow
-if [ "$1" = configure ]; then
-    launchctl unload /var/jb/Library/LaunchDaemons/com.nexusjb.burrowd.plist >/dev/null 2>&1 || true
-    launchctl load -w /var/jb/Library/LaunchDaemons/com.nexusjb.burrowd.plist || true
-fi
+# The prerm stops burrowd. When dpkg backs out of an upgrade or a removal,
+# as when the new version's preinst refuses the device, burrowd starts again.
+case "$1" in
+    configure | abort-upgrade | abort-remove | abort-deconfigure)
+        launchctl unload /var/jb/Library/LaunchDaemons/com.nexusjb.burrowd.plist >/dev/null 2>&1 || true
+        launchctl load -w /var/jb/Library/LaunchDaemons/com.nexusjb.burrowd.plist || true
+        ;;
+esac
 exit 0
 SCRIPT
 cat > "$stage/DEBIAN/prerm" <<'SCRIPT'

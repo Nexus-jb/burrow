@@ -68,7 +68,7 @@ PACKAGE_VERSION ?= 0.0.0~dev
 HEADERS := $(wildcard include/burrow/*.h src/*.h)
 MODES := direct island adrp abs adrp-far abs-far
 
-.PHONY: all test test-relocation test-loader test-safemode ios-tests ios-tests-package burrow-package clean
+.PHONY: all test test-relocation test-preinst test-loader test-safemode ios-tests ios-tests-package burrow-package clean
 
 all: $(BUILD)/libburrow.a
 
@@ -106,7 +106,11 @@ test-loader: $(BUILD)/loader/loader-tests
 test-safemode: $(BUILD)/loader/loader-tests
 	$(RUN) $(BUILD)/loader/safemode-tests $(BUILD)/loader
 
-test: test-relocation $(BUILD)/hook-tests $(OBJC_TESTS) $(LOADER_TESTS)
+# The package's check for an A12 chip or newer.
+test-preinst:
+	sh tests/preinst_tests.sh
+
+test: test-relocation test-preinst $(BUILD)/hook-tests $(OBJC_TESTS) $(LOADER_TESTS)
 	@for mode in $(MODES); do $(RUN) $(BUILD)/hook-tests $$mode || exit 1; done
 	@for program in $(OBJC_TESTS); do $(RUN) $$program || exit 1; done
 
