@@ -169,9 +169,10 @@ burrowctl why NAME     the newest crash report of the process NAME, among
                        the images on the stacks that are not Apple's, and
                        the crashed thread
 burrowctl tweaks       every tweak: its package, what its filter is for,
-                       the running processes it is in, its crashes in the
-                       crash log, and where it is turned off (root, to read
-                       every process)
+                       the running processes it is in (past ten, how many,
+                       with the ones its filter names and the latest
+                       started), its crashes in the crash log, and where it
+                       is turned off (root, to read every process)
 burrowctl loaded NAME  the tweak loader, hooking engine and tweaks in the
                        running process NAME. Burrow's loader is not mapped
                        once the jailbreak closes it; a process started after

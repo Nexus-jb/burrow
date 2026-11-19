@@ -492,6 +492,34 @@ static NSString *filter_list(NSDictionary *filter, NSString *key) {
     return items.count ? [items componentsJoinedByString:@", "] : nil;
 }
 
+// The processes a tweak runs in, kept short when there are many: the ones its
+// filter names first, then the latest started, which are the ones just
+// opened. The set is in the order the processes started.
+static NSString *running_list(NSOrderedSet<NSString *> *where, NSArray *executables) {
+    enum { shown = 10 };
+    if (!where.count) {
+        return @"no running process";
+    }
+    if (where.count <= shown) {
+        return [where.array componentsJoinedByString:@", "];
+    }
+    NSMutableOrderedSet<NSString *> *picked = [NSMutableOrderedSet orderedSet];
+    for (id name in executables) {
+        if ([name isKindOfClass:[NSString class]] && [where containsObject:name]) {
+            [picked addObject:name];
+        }
+    }
+    for (NSString *name in where.array.reverseObjectEnumerator) {
+        if (picked.count >= shown) {
+            break;
+        }
+        [picked addObject:name];
+    }
+    return [NSString stringWithFormat:@"%lu processes, among them %@ and %lu more (burrowctl loaded NAME checks one)",
+                                      (unsigned long)where.count, [picked.array componentsJoinedByString:@", "],
+                                      (unsigned long)(where.count - picked.count)];
+}
+
 // Every tweak: what it is for, where it runs now, its crashes, and whether
 // Safe Mode or the settings turned it off. The compatibility gate's table.
 static int tweaks_report(BurrowServicePaths *paths) {
@@ -563,8 +591,9 @@ static int tweaks_report(BurrowServicePaths *paths) {
         print([NSString stringWithFormat:@"  for:        %@", targets.count ? [targets componentsJoinedByString:@"; "] : @"nothing (no filter)"]);
         NSOrderedSet<NSString *> *where = running[tweak];
         runningCount += where.count > 0;
-        print([NSString stringWithFormat:@"  running in: %@", where.count ? [where.array componentsJoinedByString:@", "]
-                                                                          : @"no running process"]);
+        id executables = filter[@"Executables"];
+        print([NSString stringWithFormat:@"  running in: %@",
+                                         running_list(where, [executables isKindOfClass:[NSArray class]] ? executables : @[])]);
         NSArray<NSDictionary *> *its = crashes[tweak];
         crashedCount += its.count > 0;
         print([NSString stringWithFormat:@"  crashes:    %@",

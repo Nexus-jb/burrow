@@ -21,6 +21,7 @@
 int proc_listallpids(void *buffer, int size);
 int proc_name(int pid, void *buffer, uint32_t size);
 int proc_pidinfo(int pid, int flavor, uint64_t arg, void *buffer, int size);
+int proc_pidpath(int pid, void *buffer, uint32_t size);
 #endif
 
 // The kernel's answer to PROC_PIDREGIONPATHINFO, laid out as in the
@@ -110,9 +111,26 @@ NSDictionary<NSNumber *, NSString *> *BurrowRunningProcesses(void) {
     int listed = proc_listallpids(pids, count * (int)sizeof *pids);
     for (int i = 0; i < listed; i++) {
         char process[2 * MAXCOMLEN + 1] = { 0 };
-        if (pids[i] > 0 && proc_name(pids[i], process, sizeof process) > 0) {
-            running[@(pids[i])] = @(process);
+        if (pids[i] <= 0 || proc_name(pids[i], process, sizeof process) <= 0) {
+            continue;
         }
+        NSString *name = [NSString stringWithUTF8String:process];
+        if (!name) {
+            continue;
+        }
+        // The kernel keeps 31 characters of a name, so a longer one, such as
+        // com.apple.CloudDocs.MobileDocumentsFileProvider, is cut. The
+        // executable's file name is the whole of it.
+        if (strlen(process) >= 2 * MAXCOMLEN - 1) {
+            char path[4 * MAXPATHLEN] = { 0 };
+            if (proc_pidpath(pids[i], path, sizeof path) > 0) {
+                NSString *file = [NSString stringWithUTF8String:path].lastPathComponent;
+                if ([file hasPrefix:name]) {
+                    name = file;
+                }
+            }
+        }
+        running[@(pids[i])] = name;
     }
     free(pids);
     return running;
