@@ -177,7 +177,9 @@ burrowctl tweaks       every tweak: its package, what its filter is for,
 burrowctl loaded NAME  the tweak loader, hooking engine and tweaks in the
                        running process NAME. Burrow's loader is not mapped
                        once the jailbreak closes it; a process started after
-                       the switch is shown as loaded by it
+                       the switch is shown as loaded by it. A tweak that is a
+                       link to a library elsewhere, such as
+                       CepheiSpringBoard.dylib, is found by that library
 burrowctl check        the hooking engine's symbols the tweaks and their
                        libraries use, and whether Burrow's engine has them;
                        the tweaks and the libraries they load that use the

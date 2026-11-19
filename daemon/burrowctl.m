@@ -40,6 +40,8 @@
 #import "switch.h"
 
 #include <dlfcn.h>
+#include <limits.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 static NSString *format_date(id date) {
@@ -154,13 +156,50 @@ static NSString *owner_of_mapped(NSArray<NSString *> *files, NSArray<NSString *>
     return @"none";
 }
 
-static int loaded(NSString *name) {
+// The tweaks in directory that are links to libraries elsewhere, such as
+// CepheiSpringBoard.dylib, a link to Cephei.framework/Cephei: a process maps
+// the library under its own path, so the tweak is found by that path. The
+// library may also be in a process for another reason, as when a tweak links
+// it; then the tweak is shown there too.
+static NSDictionary<NSString *, NSArray<NSString *> *> *linked_tweaks(NSString *directory) {
+    NSMutableDictionary<NSString *, NSMutableArray<NSString *> *> *links = [NSMutableDictionary dictionary];
+    NSFileManager *files = [NSFileManager defaultManager];
+    for (NSString *file in [files contentsOfDirectoryAtPath:directory error:NULL]) {
+        if ([file hasPrefix:@"."] || ![file.pathExtension isEqualToString:@"dylib"]) {
+            continue;
+        }
+        NSString *path = [directory stringByAppendingPathComponent:file];
+        NSDictionary *attributes = [files attributesOfItemAtPath:path error:NULL];
+        if (![attributes[NSFileType] isEqualToString:NSFileTypeSymbolicLink]) {
+            continue;
+        }
+        char target[PATH_MAX];
+        if (!realpath(path.fileSystemRepresentation, target)) {
+            continue;
+        }
+        NSString *key = @(target);
+        NSMutableArray<NSString *> *names = links[key] ?: (links[key] = [NSMutableArray array]);
+        [names addObject:file.stringByDeletingPathExtension];
+    }
+    return links;
+}
+
+// The tweaks a mapped file is: the tweak itself, or the tweaks linked to it.
+static NSArray<NSString *> *tweaks_of_mapped(NSString *file, NSDictionary<NSString *, NSArray<NSString *> *> *links) {
+    if ([file containsString:@"/TweakInject/"] && [file hasSuffix:@".dylib"]) {
+        return @[ file.lastPathComponent.stringByDeletingPathExtension ];
+    }
+    return links[file] ?: @[];
+}
+
+static int loaded(NSString *name, NSString *tweakDirectory) {
     NSArray<NSNumber *> *pids = BurrowProcessesNamed(name);
     if (!pids.count) {
         print([NSString stringWithFormat:@"No running process is called %@.", name]);
         return 1;
     }
     int status = 0;
+    NSDictionary<NSString *, NSArray<NSString *> *> *links = linked_tweaks(tweakDirectory);
     for (NSNumber *pid in pids) {
         NSArray<NSString *> *files = BurrowMappedFiles(pid.intValue);
         if (!files) {
@@ -168,13 +207,11 @@ static int loaded(NSString *name) {
             status = 1;
             continue;
         }
-        NSMutableArray<NSString *> *tweaks = [NSMutableArray array];
+        NSMutableOrderedSet<NSString *> *found = [NSMutableOrderedSet orderedSet];
         for (NSString *file in files) {
-            if ([file containsString:@"/TweakInject/"] && [file hasSuffix:@".dylib"]) {
-                [tweaks addObject:file.lastPathComponent.stringByDeletingPathExtension];
-            }
+            [found addObjectsFromArray:tweaks_of_mapped(file, links)];
         }
-        [tweaks sortUsingSelector:@selector(compare:)];
+        NSArray<NSString *> *tweaks = [found.array sortedArrayUsingSelector:@selector(compare:)];
         print([NSString stringWithFormat:@"%@ (pid %@)", name, pid]);
         NSString *loader = owner_of_mapped(files, @[ @"/burrow/BurrowLoader.dylib" ], @[ @"/ellekit/libinjector.dylib" ]);
         // Burrow's loader is closed once it has loaded the tweaks, so it is
@@ -205,7 +242,7 @@ static int loaded(NSString *name) {
         NSString *root = [@"/var/jb" stringByResolvingSymlinksInPath];
         NSMutableArray<NSString *> *others = [NSMutableArray array];
         for (NSString *file in files) {
-            if ([file containsString:@"/TweakInject/"]) {
+            if ([file containsString:@"/TweakInject/"] || links[file]) {
                 continue;
             }
             for (NSString *prefix in @[ [root stringByAppendingString:@"/"], @"/var/jb/" ]) {
@@ -535,6 +572,7 @@ static int tweaks_report(BurrowServicePaths *paths) {
     // Where each tweak runs now.
     NSMutableDictionary<NSString *, NSMutableOrderedSet<NSString *> *> *running = [NSMutableDictionary dictionary];
     NSDictionary<NSNumber *, NSString *> *processes = BurrowRunningProcesses();
+    NSDictionary<NSString *, NSArray<NSString *> *> *links = linked_tweaks(directory);
     NSUInteger unread = 0;
     for (NSNumber *pid in [processes.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
         NSArray<NSString *> *mapped = BurrowMappedFiles(pid.intValue);
@@ -543,8 +581,7 @@ static int tweaks_report(BurrowServicePaths *paths) {
             continue;
         }
         for (NSString *file in mapped) {
-            if ([file containsString:@"/TweakInject/"] && [file hasSuffix:@".dylib"]) {
-                NSString *tweak = file.lastPathComponent.stringByDeletingPathExtension;
+            for (NSString *tweak in tweaks_of_mapped(file, links)) {
                 NSMutableOrderedSet<NSString *> *where =
                     running[tweak] ?: (running[tweak] = [NSMutableOrderedSet orderedSet]);
                 [where addObject:processes[pid]];
@@ -774,7 +811,7 @@ int main(int argc, char **argv) {
             return why(paths, @(argv[2]));
         }
         if ([command isEqualToString:@"loaded"] && argc == 3) {
-            return loaded(@(argv[2]));
+            return loaded(@(argv[2]), paths.tweakDirectories.firstObject);
         }
         if ([command isEqualToString:@"enable"] && (argc == 3 || argc == 4)) {
             return enable(paths, @(argv[2]), argc == 4 ? @(argv[3]) : nil);
