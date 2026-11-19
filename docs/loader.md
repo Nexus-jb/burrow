@@ -176,6 +176,16 @@ Before switching, `burrowctl check` reads the symbols each tweak, and each
 library it loads, imports from the engine's libraries, and looks each one
 up in Burrow's engine.
 
+Device results of the engine switch:
+
+| Device | Chip | iOS | Jailbreak | Build | Result |
+| ------ | ---- | --- | --------- | ----- | ------ |
+| iPhone 14 Pro Max | A16 | 16.3.1 | Dopamine, rootless, Burrow's loader | 0.0.0~dev.79 | `burrowctl check`: 20 tweaks; 14 of them import 4 symbols from the engine, and Burrow's engine has all four |
+| iPhone 14 Pro Max | A16 | 16.3.1 | Dopamine, rootless, Burrow's loader | 0.0.0~dev.80 | `burrowctl engine burrow` and a respring: SpringBoard ran, and the trial ended without the guard going back |
+| iPhone 14 Pro Max | A16 | 16.3.1 | Dopamine, rootless, Burrow's loader and engine | 0.0.0~dev.81 | `burrowctl loaded SpringBoard` after a respring: Burrow's engine mapped, with the ten tweaks, eight of which link the engine. Before the respring it showed no engine: the package had been reinstalled while SpringBoard ran, and a replaced file has no path left in the process, which `loaded` now explains |
+| iPhone 14 Pro Max | A16 | 16.3.1 | Dopamine, rootless, Burrow's loader and engine | 0.0.0~dev.81 | Settings ran with Burrow's engine and PreferenceLoader, and showed the tweaks' settings; MessageDateTime worked in Messages |
+| iPhone 14 Pro Max | A16 | 16.3.1 | Dopamine, rootless, Burrow's loader and engine | 0.0.0~dev.82 | `burrow-tests`: every suite passed for arm64 and arm64e (loader 33, Safe Mode 171) |
+
 Device results of the switch:
 
 | Device | Chip | iOS | Jailbreak | Build | Result |
