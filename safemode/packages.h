@@ -16,7 +16,9 @@ extern NSString *const BurrowPackageVersion;
 // directory holds info/*.list and status, such as /var/jb/var/lib/dpkg.
 - (instancetype)initWithDpkgDirectory:(NSString *)directory;
 
-// The installed package that owns the library at path, or nil.
+// The installed package that owns the library at path, or nil. Links are
+// followed, so a library listed under a linked directory is found under the
+// directory it links to.
 - (nullable NSDictionary<NSString *, NSString *> *)packageForLibrary:(NSString *)path;
 
 @end
