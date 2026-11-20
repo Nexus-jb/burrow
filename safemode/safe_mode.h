@@ -32,7 +32,9 @@ extern NSString *const BurrowSafeModeEventProcess;  // bundle identifier or exec
 extern NSString *const BurrowSafeModeEventTweak;    // tweak name, or "*" for every tweak
 extern NSString *const BurrowSafeModeEventReason;   // one line for people
 extern NSString *const BurrowSafeModeEventReport;   // the crash report's file name
-extern NSString *const BurrowSafeModeEventAction;   // "on" when a tweak was turned back on; absent otherwise
+// "on" when a tweak was turned back on, "off" when someone turned it off;
+// absent when Safe Mode turned it off.
+extern NSString *const BurrowSafeModeEventAction;
 
 @interface BurrowSafeMode : NSObject
 
@@ -62,17 +64,34 @@ extern NSString *const BurrowSafeModeEventAction;   // "on" when a tweak was tur
                error:(NSError **)error;
 
 // Turns a tweak back on in one process, or in every process with process
-// nil, by taking it off the processes' lists in the loader settings; "*"
-// undoes "every tweak". Records an event for each process. Returns the
-// processes it changed, which may be none, or nil on failure.
+// nil, by taking it off the processes' lists in the loader settings and,
+// with process nil, off DisabledTweaks; "*" undoes "every tweak". Records an
+// event for each process, with "*" for DisabledTweaks. Returns the
+// processes it changed, which may be none, or nil on failure, as when the
+// tweak is off everywhere and process is not nil.
 - (nullable NSArray<NSString *> *)turnOnTweak:(NSString *)tweak
                                     inProcess:(nullable NSString *)process
                                         error:(NSError **)error;
+
+// Turns a tweak off in one process, by adding it to the process's list in
+// the loader settings, or everywhere with process nil, by adding it to
+// DisabledTweaks; "*" stands for every tweak. Records an event when it
+// changes something. Sets *changed to NO when the tweak was already off
+// there. On failure returns NO and changes nothing.
+- (BOOL)turnOffTweak:(NSString *)tweak
+           inProcess:(nullable NSString *)process
+             changed:(nullable BOOL *)changed
+               error:(NSError **)error;
 
 // Every recorded event, oldest first.
 - (NSArray<NSDictionary *> *)events;
 
 + (NSString *)describeEvent:(NSDictionary *)event;
+
+// Whether loader settings read from a file follow the loader's rules: a
+// dictionary whose DisabledTweaks is an array and whose DisabledInProcesses
+// maps names to arrays.
++ (BOOL)settingsAreValid:(nullable id)settings;
 
 @end
 

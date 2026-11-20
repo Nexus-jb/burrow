@@ -326,6 +326,23 @@ static void keep_last(NSMutableArray *list, NSUInteger count) {
     return [self write:state to:_statePath error:error];
 }
 
+- (void)recordTweak:(NSString *)tweak inProcesses:(NSArray<NSString *> *)processes action:(NSString *)action {
+    NSMutableDictionary *state = [self readState];
+    for (NSString *name in processes) {
+        [state[@"Events"] addObject:@{
+            BurrowSafeModeEventDate : [NSDate date],
+            BurrowSafeModeEventProcess : name,
+            BurrowSafeModeEventTweak : tweak,
+            BurrowSafeModeEventReason : [@"with burrowctl " stringByAppendingString:
+                                                             [action isEqualToString:@"on"] ? @"enable" : @"disable"],
+            BurrowSafeModeEventAction : action,
+        }];
+    }
+    keep_last(state[@"Events"], KeptEvents);
+    // The settings changed; the event is only a record.
+    [self write:state to:_statePath error:NULL];
+}
+
 - (NSArray<NSString *> *)turnOnTweak:(NSString *)tweak inProcess:(NSString *)process error:(NSError **)error {
     int lock = [self lock:error];
     if (lock < 0) {
@@ -333,6 +350,13 @@ static void keep_last(NSMutableArray *list, NSUInteger count) {
     }
     NSMutableArray<NSString *> *changed = nil;
     NSMutableDictionary *settings = [self readSettings:error];
+    NSMutableArray *everywhere = typed(settings[@"DisabledTweaks"], [NSMutableArray class]);
+    if (settings && process && [everywhere containsObject:tweak]) {
+        if (error) {
+            *error = safe_mode_error(@"it is turned off everywhere; turn it back on everywhere first");
+        }
+        settings = nil;
+    }
     if (settings) {
         changed = [NSMutableArray array];
         NSMutableDictionary *processes = typed(settings[@"DisabledInProcesses"], [NSMutableDictionary class]);
@@ -347,21 +371,13 @@ static void keep_last(NSMutableArray *list, NSUInteger count) {
             }
             [changed addObject:name];
         }
+        if (!process && [everywhere containsObject:tweak]) {
+            [everywhere removeObject:tweak];
+            [changed addObject:AllTweaks];
+        }
         if (changed.count) {
             if ([self write:settings to:_settingsPath error:error]) {
-                NSMutableDictionary *state = [self readState];
-                for (NSString *name in changed) {
-                    [state[@"Events"] addObject:@{
-                        BurrowSafeModeEventDate : [NSDate date],
-                        BurrowSafeModeEventProcess : name,
-                        BurrowSafeModeEventTweak : tweak,
-                        BurrowSafeModeEventReason : @"with burrowctl enable",
-                        BurrowSafeModeEventAction : @"on",
-                    }];
-                }
-                keep_last(state[@"Events"], KeptEvents);
-                // The settings changed; the event is only a record.
-                [self write:state to:_statePath error:NULL];
+                [self recordTweak:tweak inProcesses:changed action:@"on"];
             } else {
                 changed = nil;
             }
@@ -371,15 +387,63 @@ static void keep_last(NSMutableArray *list, NSUInteger count) {
     return changed;
 }
 
+- (BOOL)turnOffTweak:(NSString *)tweak inProcess:(NSString *)process changed:(BOOL *)changed error:(NSError **)error {
+    if (changed) {
+        *changed = NO;
+    }
+    if (!tweak.length || [process isEqualToString:AllTweaks] || (process && !process.length)) {
+        if (error) {
+            *error = safe_mode_error(@"a tweak and a process name are needed");
+        }
+        return NO;
+    }
+    int lock = [self lock:error];
+    if (lock < 0) {
+        return NO;
+    }
+    BOOL written = NO;
+    NSMutableDictionary *settings = [self readSettings:error];
+    if (settings) {
+        NSMutableArray *everywhere = typed(settings[@"DisabledTweaks"], [NSMutableArray class]);
+        BOOL added = ![everywhere containsObject:tweak] && ![everywhere containsObject:AllTweaks];
+        if (added && process) {
+            added = turn_off(settings, process, tweak);
+        } else if (added) {
+            if (!everywhere) {
+                everywhere = [NSMutableArray array];
+                settings[@"DisabledTweaks"] = everywhere;
+            }
+            [everywhere addObject:tweak];
+        }
+        written = !added || [self write:settings to:_settingsPath error:error];
+        if (added && written) {
+            [self recordTweak:tweak inProcesses:@[ process ?: AllTweaks ] action:@"off"];
+            if (changed) {
+                *changed = YES;
+            }
+        }
+    }
+    close(lock);
+    return written;
+}
+
 + (NSString *)describeEvent:(NSDictionary *)event {
     NSString *tweak = event[BurrowSafeModeEventTweak];
     NSString *what = [tweak isEqual:AllTweaks] ? @"every tweak" : tweak;
-    if ([event[BurrowSafeModeEventAction] isEqual:@"on"]) {
-        return [NSString stringWithFormat:@"turned %@ back on in %@ %@", what, event[BurrowSafeModeEventProcess],
-                                          event[BurrowSafeModeEventReason]];
+    NSString *process = event[BurrowSafeModeEventProcess];
+    NSString *where = [process isEqual:AllTweaks] ? @"everywhere" : [@"in " stringByAppendingString:process ?: @"?"];
+    NSString *action = event[BurrowSafeModeEventAction];
+    if ([action isEqual:@"on"]) {
+        return [NSString stringWithFormat:@"turned %@ back on %@ %@", what, where, event[BurrowSafeModeEventReason]];
     }
-    return [NSString stringWithFormat:@"turned off %@ in %@: %@", what, event[BurrowSafeModeEventProcess],
-                                      event[BurrowSafeModeEventReason]];
+    if ([action isEqual:@"off"]) {
+        return [NSString stringWithFormat:@"turned %@ off %@ %@", what, where, event[BurrowSafeModeEventReason]];
+    }
+    return [NSString stringWithFormat:@"turned off %@ in %@: %@", what, process, event[BurrowSafeModeEventReason]];
+}
+
++ (BOOL)settingsAreValid:(id)settings {
+    return settings_are_valid(settings);
 }
 
 @end

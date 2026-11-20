@@ -9,8 +9,16 @@
 //   burrowctl loaded NAME     the tweak loader, hooking engine and tweaks in
 //                             the running processes called NAME (as root)
 //   burrowctl enable TWEAK [PROCESS]
-//                             turn a tweak Safe Mode turned off back on, in
-//                             PROCESS as Safe Mode named it or everywhere
+//                             turn a tweak back on, in PROCESS as Safe Mode
+//                             named it, or everywhere (root only)
+//   burrowctl disable TWEAK [PROCESS]
+//                             turn a tweak off in PROCESS, a bundle
+//                             identifier or an executable name, or
+//                             everywhere (root only; Burrow's loader reads it)
+//   burrowctl json            the loader and engine in use, the loader
+//                             settings, every tweak with its filter and
+//                             package, and the Safe Mode events, as JSON for
+//                             package managers
 //   burrowctl tweaks          every tweak: what it is for, where it runs now,
 //                             its crashes, and where it is turned off
 //   burrowctl engine burrow|ellekit
@@ -57,6 +65,8 @@ static NSString *format_date(id date) {
 static void print(NSString *text) {
     printf("%s\n", text.UTF8String);
 }
+
+static NSString *describe_places(NSArray<NSString *> *processes);
 
 static NSArray<NSDictionary *> *crash_entries(BurrowServicePaths *paths) {
     BurrowCrashAnalyzer *analyzer = [[BurrowCrashAnalyzer alloc] initWithTweakDirectories:@[] jailbreakRoots:@[]];
@@ -107,7 +117,8 @@ static int status(BurrowServicePaths *paths) {
     if (since) {
         NSUInteger off = 0;
         for (NSDictionary *event in safe_mode_events(paths)) {
-            off += ![event[BurrowSafeModeEventAction] isEqual:@"on"];
+            // Safe Mode's own events have no action.
+            off += event[BurrowSafeModeEventAction] == nil;
         }
         print([NSString stringWithFormat:@"Safe Mode:       on since %@, turned tweaks off %lu times (burrowctl events)",
                                          format_date(since), (unsigned long)off]);
@@ -654,8 +665,8 @@ static int tweaks_report(BurrowServicePaths *paths) {
         }
         print([NSString stringWithFormat:@"  crashes:    %@", crashText]);
         NSMutableArray<NSString *> *off = [NSMutableArray array];
-        if ([disabled containsObject:tweak]) {
-            [off addObject:@"everywhere"];
+        if ([disabled containsObject:tweak] || [disabled containsObject:@"*"]) {
+            [off addObject:@"*"];
         }
         for (NSString *process in [perProcess.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
             id list = perProcess[process];
@@ -665,8 +676,8 @@ static int tweaks_report(BurrowServicePaths *paths) {
         }
         offCount += off.count > 0;
         if (off.count) {
-            print([NSString stringWithFormat:@"  turned off: in %@ (burrowctl enable %@ turns it back on)",
-                                             [off componentsJoinedByString:@", "], tweak]);
+            print([NSString stringWithFormat:@"  turned off: %@ (burrowctl enable %@ turns it back on)",
+                                             describe_places(off), tweak]);
         }
     }
     NSString *crashSummary = [NSString stringWithFormat:@"%lu with crashes", (unsigned long)crashedCount];
@@ -751,17 +762,39 @@ static int crashes(BurrowServicePaths *paths, NSUInteger count) {
     return 0;
 }
 
+static BurrowSafeMode *settings_editor(BurrowServicePaths *paths) {
+    return [[BurrowSafeMode alloc] initWithTweakDirectories:@[]
+                                             jailbreakRoots:@[]
+                                               settingsPath:paths.settingsPath
+                                                  statePath:paths.safeModeStatePath];
+}
+
+// "in com.example.app", "everywhere", or both, for processes as the
+// settings name them, with "*" for everywhere.
+static NSString *describe_places(NSArray<NSString *> *processes) {
+    NSMutableArray<NSString *> *named = [NSMutableArray array];
+    BOOL everywhere = NO;
+    for (NSString *process in processes) {
+        if ([process isEqualToString:@"*"]) {
+            everywhere = YES;
+        } else {
+            [named addObject:process];
+        }
+    }
+    NSString *in = named.count ? [@"in " stringByAppendingString:[named componentsJoinedByString:@", "]] : nil;
+    if (everywhere) {
+        return in ? [@"everywhere, and " stringByAppendingString:in] : @"everywhere";
+    }
+    return in ?: @"nowhere";
+}
+
 static int enable(BurrowServicePaths *paths, NSString *tweak, NSString *process) {
     if (geteuid() != 0) {
         print(@"Turning a tweak back on needs root.");
         return 1;
     }
-    BurrowSafeMode *safe_mode = [[BurrowSafeMode alloc] initWithTweakDirectories:@[]
-                                                                  jailbreakRoots:@[]
-                                                                    settingsPath:paths.settingsPath
-                                                                       statePath:paths.safeModeStatePath];
     NSError *error = nil;
-    NSArray<NSString *> *changed = [safe_mode turnOnTweak:tweak inProcess:process error:&error];
+    NSArray<NSString *> *changed = [settings_editor(paths) turnOnTweak:tweak inProcess:process error:&error];
     if (!changed) {
         print([NSString stringWithFormat:@"%@ cannot be turned back on: %@", tweak, error.localizedDescription]);
         return 1;
@@ -771,9 +804,163 @@ static int enable(BurrowServicePaths *paths, NSString *tweak, NSString *process)
                                          process ? [@" in " stringByAppendingString:process] : @""]);
         return 1;
     }
-    print([NSString stringWithFormat:@"%@ is back on in %@. It loads when each of them starts again; for "
+    print([NSString stringWithFormat:@"%@ is back on %@. It loads when each process starts again; for "
                                      @"SpringBoard, run killall SpringBoard.",
-                                     tweak, [changed componentsJoinedByString:@", "]]);
+                                     tweak, describe_places(changed)]);
+    return 0;
+}
+
+static int disable(BurrowServicePaths *paths, NSString *tweak, NSString *process) {
+    if (geteuid() != 0) {
+        print(@"Turning a tweak off needs root.");
+        return 1;
+    }
+    NSString *directory = paths.tweakDirectories.firstObject;
+    NSString *library = [directory stringByAppendingPathComponent:[tweak stringByAppendingPathExtension:@"dylib"]];
+    if (![tweak isEqualToString:@"*"] &&
+        (!tweak.length || [tweak containsString:@"/"] || [tweak hasPrefix:@"."] ||
+         ![[NSFileManager defaultManager] fileExistsAtPath:library])) {
+        print([NSString stringWithFormat:@"There is no tweak called %@ in %@.", tweak, directory]);
+        return 1;
+    }
+    if (process && (!process.length || [process isEqualToString:@"*"] || [process containsString:@"/"])) {
+        print(@"Name the process by its bundle identifier or its executable name.");
+        return 1;
+    }
+    BOOL changed = NO;
+    NSError *error = nil;
+    if (![settings_editor(paths) turnOffTweak:tweak inProcess:process changed:&changed error:&error]) {
+        print([NSString stringWithFormat:@"%@ cannot be turned off: %@", tweak, error.localizedDescription]);
+        return 1;
+    }
+    NSString *what = [tweak isEqualToString:@"*"] ? @"Every tweak" : tweak;
+    NSString *where = describe_places(@[ process ?: @"*" ]);
+    if (!changed) {
+        print([NSString stringWithFormat:@"%@ is already off %@.", what, where]);
+        return 0;
+    }
+    print([NSString stringWithFormat:@"%@ is off %@. It stops loading when each process starts again; for "
+                                     @"SpringBoard, run killall SpringBoard.",
+                                     what, where]);
+    if (!BurrowLoaderActiveSince()) {
+        print(@"ElleKit's loader does not read these settings; they apply once Burrow's loader is in use "
+              @"(burrowctl loader burrow).");
+    }
+    return 0;
+}
+
+static id json_date(id date) {
+    if (![date isKindOfClass:[NSDate class]]) {
+        return [NSNull null];
+    }
+    return [[[NSISO8601DateFormatter alloc] init] stringFromDate:date];
+}
+
+static NSArray<NSString *> *json_strings(id list) {
+    NSMutableArray<NSString *> *items = [NSMutableArray array];
+    if ([list isKindOfClass:[NSArray class]]) {
+        for (id item in list) {
+            if ([item isKindOfClass:[NSString class]]) {
+                [items addObject:item];
+            }
+        }
+    }
+    return items;
+}
+
+// What a package manager shows of Burrow, as one JSON object. "format"
+// changes only when a key changes its meaning; new keys may appear.
+static int json_report(BurrowServicePaths *paths) {
+    NSMutableDictionary *report = [NSMutableDictionary dictionary];
+    report[@"format"] = @1;
+    report[@"loader"] = BurrowOwnerOfFile(BurrowSystemLoaderPath);
+    report[@"engine"] = BurrowOwnerOfFile(BurrowSystemEnginePath);
+    report[@"daemonRunning"] = @(BurrowDaemonPID() != 0);
+    NSDate *since = BurrowLoaderActiveSince();
+    report[@"safeModeSince"] = json_date(since);
+    NSDictionary *trial = [NSDictionary dictionaryWithContentsOfFile:BurrowTrialPath];
+    NSDate *until = trial[@"Until"];
+    report[@"trialUntil"] = since && [until isKindOfClass:[NSDate class]] && until.timeIntervalSinceNow > 0
+                                ? json_date(until)
+                                : [NSNull null];
+    NSDictionary *went_back = since ? nil : [NSDictionary dictionaryWithContentsOfFile:BurrowGuardPath];
+    report[@"wentBack"] = went_back ? @{
+        @"date" : json_date(went_back[@"Date"]),
+        @"reason" : [went_back[@"Reason"] isKindOfClass:[NSString class]] ? went_back[@"Reason"] : @"",
+    }
+                                    : [NSNull null];
+
+    // The settings, as the loader reads them.
+    NSData *data = [NSData dataWithContentsOfFile:paths.settingsPath];
+    BOOL exists = [[NSFileManager defaultManager] fileExistsAtPath:paths.settingsPath];
+    id settings = data ? [NSPropertyListSerialization propertyListWithData:data options:0 format:NULL error:NULL] : nil;
+    BOOL valid = !exists || [BurrowSafeMode settingsAreValid:settings];
+    report[@"settings"] = !exists ? @"none" : (valid ? @"valid" : @"invalid");
+    report[@"settingsPath"] = paths.settingsPath;
+    NSMutableDictionary *per_process = [NSMutableDictionary dictionary];
+    if (valid && exists) {
+        NSDictionary *processes = settings[@"DisabledInProcesses"];
+        for (NSString *process in processes) {
+            per_process[process] = json_strings(processes[process]);
+        }
+    }
+    report[@"disabledEverywhere"] = valid && exists ? json_strings(settings[@"DisabledTweaks"]) : @[];
+    report[@"disabledInProcesses"] = per_process;
+
+    // Every tweak in the directory, with what its filter names.
+    NSFileManager *files = [NSFileManager defaultManager];
+    NSString *directory = paths.tweakDirectories.firstObject;
+    report[@"tweakDirectory"] = directory;
+    BurrowPackageIndex *packages = [[BurrowPackageIndex alloc] initWithDpkgDirectory:paths.dpkgDirectory];
+    NSMutableArray *tweaks = [NSMutableArray array];
+    for (NSString *file in [[files contentsOfDirectoryAtPath:directory error:NULL]
+             sortedArrayUsingSelector:@selector(caseInsensitiveCompare:)]) {
+        if ([file hasPrefix:@"."] || ![file.pathExtension isEqualToString:@"dylib"]) {
+            continue;
+        }
+        NSString *name = file.stringByDeletingPathExtension;
+        NSDictionary *plist = [NSDictionary
+            dictionaryWithContentsOfFile:[directory stringByAppendingPathComponent:[name stringByAppendingPathExtension:@"plist"]]];
+        NSDictionary *filter = [plist[@"Filter"] isKindOfClass:[NSDictionary class]] ? plist[@"Filter"] : @{};
+        id manager = plist[@"IsTweakManager"];
+        NSMutableDictionary *tweak = [@{
+            @"name" : name,
+            @"bundles" : json_strings(filter[@"Bundles"]),
+            @"executables" : json_strings(filter[@"Executables"]),
+            @"classes" : json_strings(filter[@"Classes"]),
+            @"manager" : @([manager isKindOfClass:[NSNumber class]] && [manager boolValue]),
+        } mutableCopy];
+        NSDictionary *package = [packages packageForLibrary:[directory stringByAppendingPathComponent:file]];
+        if (package[BurrowPackageIdentifier]) {
+            tweak[@"package"] = package[BurrowPackageIdentifier];
+            tweak[@"packageName"] = package[BurrowPackageName] ?: [NSNull null];
+            tweak[@"packageVersion"] = package[BurrowPackageVersion] ?: [NSNull null];
+        }
+        [tweaks addObject:tweak];
+    }
+    report[@"tweaks"] = tweaks;
+
+    NSMutableArray *events = [NSMutableArray array];
+    for (NSDictionary *event in safe_mode_events(paths)) {
+        id action = event[BurrowSafeModeEventAction];
+        [events addObject:@{
+            @"date" : json_date(event[BurrowSafeModeEventDate]),
+            @"process" : [event[BurrowSafeModeEventProcess] isKindOfClass:[NSString class]] ? event[BurrowSafeModeEventProcess] : @"",
+            @"tweak" : [event[BurrowSafeModeEventTweak] isKindOfClass:[NSString class]] ? event[BurrowSafeModeEventTweak] : @"",
+            @"action" : [action isKindOfClass:[NSString class]] ? action : @"safe-mode",
+            @"text" : [BurrowSafeMode describeEvent:event],
+        }];
+    }
+    report[@"events"] = events;
+
+    NSError *error = nil;
+    NSData *json = [NSJSONSerialization dataWithJSONObject:report options:NSJSONWritingSortedKeys error:&error];
+    if (!json) {
+        fprintf(stderr, "burrowctl: %s\n", error.localizedDescription.UTF8String);
+        return 1;
+    }
+    fwrite(json.bytes, 1, json.length, stdout);
+    printf("\n");
     return 0;
 }
 
@@ -816,6 +1003,12 @@ int main(int argc, char **argv) {
         if ([command isEqualToString:@"enable"] && (argc == 3 || argc == 4)) {
             return enable(paths, @(argv[2]), argc == 4 ? @(argv[3]) : nil);
         }
+        if ([command isEqualToString:@"disable"] && (argc == 3 || argc == 4)) {
+            return disable(paths, @(argv[2]), argc == 4 ? @(argv[3]) : nil);
+        }
+        if ([command isEqualToString:@"json"] && argc == 2) {
+            return json_report(paths);
+        }
         if ([command isEqualToString:@"tweaks"] && argc == 2) {
             return tweaks_report(paths);
         }
@@ -831,7 +1024,8 @@ int main(int argc, char **argv) {
                 return result;
             }
         }
-        fprintf(stderr, "usage: burrowctl status | crashes [count] | events | enable TWEAK [PROCESS] | check | "
+        fprintf(stderr, "usage: burrowctl status | crashes [count] | events | enable TWEAK [PROCESS] | "
+                        "disable TWEAK [PROCESS] | json | check | "
                         "why NAME|FILE | loaded NAME | tweaks | loader burrow|ellekit | engine burrow|ellekit\n");
         return 2;
     }
