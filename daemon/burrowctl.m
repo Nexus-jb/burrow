@@ -877,7 +877,8 @@ static int json_report(BurrowServicePaths *paths) {
     report[@"format"] = @1;
     report[@"loader"] = BurrowOwnerOfFile(BurrowSystemLoaderPath);
     report[@"engine"] = BurrowOwnerOfFile(BurrowSystemEnginePath);
-    report[@"daemonRunning"] = @(BurrowDaemonPID() != 0);
+    // A comparison is an int in C, which JSON would print as 1 or 0.
+    report[@"daemonRunning"] = BurrowDaemonPID() != 0 ? @YES : @NO;
     NSDate *since = BurrowLoaderActiveSince();
     report[@"safeModeSince"] = json_date(since);
     NSDictionary *trial = [NSDictionary dictionaryWithContentsOfFile:BurrowTrialPath];
@@ -930,7 +931,7 @@ static int json_report(BurrowServicePaths *paths) {
             @"bundles" : json_strings(filter[@"Bundles"]),
             @"executables" : json_strings(filter[@"Executables"]),
             @"classes" : json_strings(filter[@"Classes"]),
-            @"manager" : @([manager isKindOfClass:[NSNumber class]] && [manager boolValue]),
+            @"manager" : [manager isKindOfClass:[NSNumber class]] && [manager boolValue] ? @YES : @NO,
         } mutableCopy];
         NSDictionary *package = [packages packageForLibrary:[directory stringByAppendingPathComponent:file]];
         if (package[BurrowPackageIdentifier]) {
