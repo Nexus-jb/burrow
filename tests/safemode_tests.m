@@ -251,9 +251,22 @@ static void test_fixtures(NSString *fixtures, NSString *scratch) {
     CHECK([read_plist(settings)[@"DisabledInProcesses"][@"com.example.app"] isEqual:@[ @"Bar" ]]);
     CHECK([[BurrowSafeMode describeEvent:safe_mode.events.lastObject]
         isEqualToString:@"turned Foo back on everywhere with burrowctl enable"]);
-    // A process must be named, and "*" is not a process.
-    CHECK(![safe_mode turnOffTweak:@"Foo" inProcess:@"*" changed:&off_changed error:&enable_error]);
+    // Process "*" is DisabledTweaks alone, both ways: turning a tweak back on
+    // there leaves the processes where it is off alone.
+    CHECK([safe_mode turnOffTweak:@"Foo" inProcess:@"com.example.app" changed:&off_changed error:&enable_error]);
+    CHECK([safe_mode turnOffTweak:@"Foo" inProcess:@"*" changed:&off_changed error:&enable_error]);
+    CHECK(off_changed);
+    CHECK([read_plist(settings)[@"DisabledTweaks"] isEqual:(@[ @"Old", @"Foo" ])]);
+    changed = [safe_mode turnOnTweak:@"Foo" inProcess:@"*" error:&enable_error];
+    CHECK([changed isEqualToArray:@[ @"*" ]]);
+    CHECK([read_plist(settings)[@"DisabledTweaks"] isEqual:@[ @"Old" ]]);
+    CHECK([read_plist(settings)[@"DisabledInProcesses"][@"com.example.app"] isEqual:(@[ @"Bar", @"Foo" ])]);
+    changed = [safe_mode turnOnTweak:@"Foo" inProcess:@"com.example.app" error:&enable_error];
+    CHECK([changed isEqualToArray:@[ @"com.example.app" ]]);
+    CHECK([read_plist(settings)[@"DisabledInProcesses"][@"com.example.app"] isEqual:@[ @"Bar" ]]);
+    // A tweak and a process must be named.
     CHECK(![safe_mode turnOffTweak:@"" inProcess:@"com.example.app" changed:&off_changed error:&enable_error]);
+    CHECK(![safe_mode turnOffTweak:@"Foo" inProcess:@"" changed:&off_changed error:&enable_error]);
     CHECK([BurrowSafeMode settingsAreValid:read_plist(settings)]);
     CHECK(![BurrowSafeMode settingsAreValid:@{ @"DisabledInProcesses" : @{ @"com.example.app" : @"Foo" } }]);
 

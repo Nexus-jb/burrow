@@ -63,19 +63,19 @@ extern NSString *const BurrowSafeModeEventAction;
                event:(NSDictionary *_Nullable *_Nullable)event
                error:(NSError **)error;
 
-// Turns a tweak back on in one process, or in every process with process
-// nil, by taking it off the processes' lists in the loader settings and,
-// with process nil, off DisabledTweaks; "*" undoes "every tweak". Records an
-// event for each process, with "*" for DisabledTweaks. Returns the
-// processes it changed, which may be none, or nil on failure, as when the
-// tweak is off everywhere and process is not nil.
+// Turns a tweak back on in one process, by taking it off the process's list
+// in the loader settings; with process "*", by taking it off DisabledTweaks
+// only; with process nil, both, wherever it is off. Tweak "*" undoes "every
+// tweak". Records an event for each process, with "*" for DisabledTweaks.
+// Returns the processes it changed, which may be none, or nil on failure,
+// as when the tweak is off everywhere and process names one process.
 - (nullable NSArray<NSString *> *)turnOnTweak:(NSString *)tweak
                                     inProcess:(nullable NSString *)process
                                         error:(NSError **)error;
 
 // Turns a tweak off in one process, by adding it to the process's list in
-// the loader settings, or everywhere with process nil, by adding it to
-// DisabledTweaks; "*" stands for every tweak. Records an event when it
+// the loader settings, or everywhere with process nil or "*", by adding it
+// to DisabledTweaks; tweak "*" stands for every tweak. Records an event when it
 // changes something. Sets *changed to NO when the tweak was already off
 // there. On failure returns NO and changes nothing.
 - (BOOL)turnOffTweak:(NSString *)tweak

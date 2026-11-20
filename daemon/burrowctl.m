@@ -10,11 +10,13 @@
 //                             the running processes called NAME (as root)
 //   burrowctl enable TWEAK [PROCESS]
 //                             turn a tweak back on, in PROCESS as Safe Mode
-//                             named it, or everywhere (root only)
+//                             named it, in DisabledTweaks with PROCESS *, or
+//                             wherever it is off (root only)
 //   burrowctl disable TWEAK [PROCESS]
 //                             turn a tweak off in PROCESS, a bundle
 //                             identifier or an executable name, or
-//                             everywhere (root only; Burrow's loader reads it)
+//                             everywhere without one or with * (root only;
+//                             Burrow's loader reads it)
 //   burrowctl json            the loader and engine in use, the loader
 //                             settings, every tweak with its filter and
 //                             package, and the Safe Mode events, as JSON for
@@ -823,8 +825,8 @@ static int disable(BurrowServicePaths *paths, NSString *tweak, NSString *process
         print([NSString stringWithFormat:@"There is no tweak called %@ in %@.", tweak, directory]);
         return 1;
     }
-    if (process && (!process.length || [process isEqualToString:@"*"] || [process containsString:@"/"])) {
-        print(@"Name the process by its bundle identifier or its executable name.");
+    if (process && (!process.length || [process containsString:@"/"])) {
+        print(@"Name the process by its bundle identifier or its executable name, or * for everywhere.");
         return 1;
     }
     BOOL changed = NO;

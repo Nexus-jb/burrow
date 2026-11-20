@@ -101,11 +101,12 @@ turned off every tweak in backboardd: crashed 3 times within 120 seconds, and no
 
 The events are for the package manager to show, next to a way to turn the
 tweak back on. `burrowctl enable TWEAK [PROCESS]` turns a tweak back on, in
-one process as Safe Mode named it, or everywhere: in every process and in
-`DisabledTweaks`. A tweak that is off everywhere has to come back on
-everywhere before it can come back on in one process, since the settings
-can only turn tweaks off. `burrowctl disable TWEAK [PROCESS]` turns a tweak
-off by hand, in one process or everywhere. Both record an event; `burrowctl
+one process as Safe Mode named it; with `*` as the process, in
+`DisabledTweaks` alone; or, without a process, wherever it is off. A tweak
+that is off everywhere has to come back on everywhere before it can come
+back on in one process, since the settings can only turn tweaks off.
+`burrowctl disable TWEAK [PROCESS]` turns a tweak off by hand, in one
+process, or everywhere without a process or with `*`. Both record an event; `burrowctl
 status` counts only Safe Mode's own:
 
 ```

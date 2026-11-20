@@ -351,7 +351,8 @@ static void keep_last(NSMutableArray *list, NSUInteger count) {
     NSMutableArray<NSString *> *changed = nil;
     NSMutableDictionary *settings = [self readSettings:error];
     NSMutableArray *everywhere = typed(settings[@"DisabledTweaks"], [NSMutableArray class]);
-    if (settings && process && [everywhere containsObject:tweak]) {
+    BOOL only_everywhere = [process isEqualToString:AllTweaks];
+    if (settings && process && !only_everywhere && [everywhere containsObject:tweak]) {
         if (error) {
             *error = safe_mode_error(@"it is turned off everywhere; turn it back on everywhere first");
         }
@@ -371,7 +372,7 @@ static void keep_last(NSMutableArray *list, NSUInteger count) {
             }
             [changed addObject:name];
         }
-        if (!process && [everywhere containsObject:tweak]) {
+        if ((!process || only_everywhere) && [everywhere containsObject:tweak]) {
             [everywhere removeObject:tweak];
             [changed addObject:AllTweaks];
         }
@@ -391,7 +392,10 @@ static void keep_last(NSMutableArray *list, NSUInteger count) {
     if (changed) {
         *changed = NO;
     }
-    if (!tweak.length || [process isEqualToString:AllTweaks] || (process && !process.length)) {
+    if ([process isEqualToString:AllTweaks]) {
+        process = nil;
+    }
+    if (!tweak.length || (process && !process.length)) {
         if (error) {
             *error = safe_mode_error(@"a tweak and a process name are needed");
         }
