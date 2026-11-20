@@ -100,13 +100,26 @@ turned off every tweak in backboardd: crashed 3 times within 120 seconds, and no
 ```
 
 The events are for the package manager to show, next to a way to turn the
-tweak back on. Until it does, `burrowctl enable TWEAK [PROCESS]` turns a
-tweak back on, in one process as Safe Mode named it or in every process,
-and records that as an event too:
+tweak back on. `burrowctl enable TWEAK [PROCESS]` turns a tweak back on, in
+one process as Safe Mode named it; with `*` as the process, in
+`DisabledTweaks` alone; or, without a process, wherever it is off. A tweak
+that is off everywhere has to come back on everywhere before it can come
+back on in one process, since the settings can only turn tweaks off.
+`burrowctl disable TWEAK [PROCESS]` turns a tweak off by hand, in one
+process, or everywhere without a process or with `*`. Both record an event; `burrowctl
+status` counts only Safe Mode's own:
 
 ```
 turned Foo back on in com.apple.springboard with burrowctl enable
+turned Foo off in com.example.bank with burrowctl disable
+turned Foo off everywhere with burrowctl disable
 ```
+
+Codling shows the tweaks, the settings and these events with `burrowctl
+json`, which prints one JSON object: the loader and engine in use, the
+guard's trial, whether the settings are valid, `DisabledTweaks` and
+`DisabledInProcesses`, every tweak with its filter and package, and the
+events. Its `format` changes only when a key changes its meaning.
 
 The last 100 events are kept.
 
@@ -160,8 +173,13 @@ burrowctl status       the tweak loader and hooking engine in use, burrowd,
 burrowctl crashes [N]  the N newest crashes with tweaks loaded (10)
 burrowctl events       what Safe Mode turned off, and why
 burrowctl enable TWEAK [PROCESS]
-                       turn a tweak Safe Mode turned off back on, in
-                       PROCESS or everywhere (root only)
+                       turn a tweak back on, in PROCESS or everywhere
+                       (root only)
+burrowctl disable TWEAK [PROCESS]
+                       turn a tweak off, in PROCESS or everywhere (root
+                       only; Burrow's loader reads it)
+burrowctl json         the state above, the loader settings, the tweaks
+                       and the events, as JSON for package managers
 burrowctl why NAME     the newest crash report of the process NAME, among
                        the system's and the crash log's copies (or a
                        report file): the exception, the tweaks found, the

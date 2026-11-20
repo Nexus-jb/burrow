@@ -219,6 +219,57 @@ static void test_fixtures(NSString *fixtures, NSString *scratch) {
     CHECK([[BurrowSafeMode describeEvent:back_on]
         isEqualToString:@"turned every tweak back on in backboardd with burrowctl enable"]);
 
+    // Turning a tweak off by hand, in one process or everywhere, as a
+    // package manager does with burrowctl disable.
+    BOOL off_changed = NO;
+    CHECK([safe_mode turnOffTweak:@"Foo" inProcess:@"com.example.app" changed:&off_changed error:&enable_error]);
+    CHECK(off_changed);
+    CHECK([read_plist(settings)[@"DisabledInProcesses"][@"com.example.app"] isEqual:(@[ @"Bar", @"Foo" ])]);
+    CHECK([safe_mode.events.lastObject[BurrowSafeModeEventAction] isEqualToString:@"off"]);
+    CHECK([[BurrowSafeMode describeEvent:safe_mode.events.lastObject]
+        isEqualToString:@"turned Foo off in com.example.app with burrowctl disable"]);
+    NSUInteger event_count = safe_mode.events.count;
+    CHECK([safe_mode turnOffTweak:@"Foo" inProcess:@"com.example.app" changed:&off_changed error:&enable_error]);
+    CHECK(!off_changed);
+    CHECK(safe_mode.events.count == event_count);
+    CHECK([safe_mode turnOffTweak:@"Foo" inProcess:nil changed:&off_changed error:&enable_error]);
+    CHECK(off_changed);
+    CHECK([read_plist(settings)[@"DisabledTweaks"] isEqual:(@[ @"Old", @"Foo" ])]);
+    CHECK([[BurrowSafeMode describeEvent:safe_mode.events.lastObject]
+        isEqualToString:@"turned Foo off everywhere with burrowctl disable"]);
+    // Off everywhere already covers each process.
+    CHECK([safe_mode turnOffTweak:@"Foo" inProcess:@"com.apple.springboard" changed:&off_changed error:&enable_error]);
+    CHECK(!off_changed);
+    CHECK([read_plist(settings)[@"DisabledInProcesses"][@"com.apple.springboard"] isEqual:@[ @"Baz" ]]);
+    // A tweak that is off everywhere comes back on everywhere first, and
+    // then everywhere it was turned off.
+    CHECK([safe_mode turnOnTweak:@"Foo" inProcess:@"com.example.app" error:&enable_error] == nil);
+    CHECK([read_plist(settings)[@"DisabledInProcesses"][@"com.example.app"] isEqual:(@[ @"Bar", @"Foo" ])]);
+    changed = [safe_mode turnOnTweak:@"Foo" inProcess:nil error:&enable_error];
+    CHECK([changed isEqualToArray:(@[ @"com.example.app", @"*" ])]);
+    CHECK([read_plist(settings)[@"DisabledTweaks"] isEqual:@[ @"Old" ]]);
+    CHECK([read_plist(settings)[@"DisabledInProcesses"][@"com.example.app"] isEqual:@[ @"Bar" ]]);
+    CHECK([[BurrowSafeMode describeEvent:safe_mode.events.lastObject]
+        isEqualToString:@"turned Foo back on everywhere with burrowctl enable"]);
+    // Process "*" is DisabledTweaks alone, both ways: turning a tweak back on
+    // there leaves the processes where it is off alone.
+    CHECK([safe_mode turnOffTweak:@"Foo" inProcess:@"com.example.app" changed:&off_changed error:&enable_error]);
+    CHECK([safe_mode turnOffTweak:@"Foo" inProcess:@"*" changed:&off_changed error:&enable_error]);
+    CHECK(off_changed);
+    CHECK([read_plist(settings)[@"DisabledTweaks"] isEqual:(@[ @"Old", @"Foo" ])]);
+    changed = [safe_mode turnOnTweak:@"Foo" inProcess:@"*" error:&enable_error];
+    CHECK([changed isEqualToArray:@[ @"*" ]]);
+    CHECK([read_plist(settings)[@"DisabledTweaks"] isEqual:@[ @"Old" ]]);
+    CHECK([read_plist(settings)[@"DisabledInProcesses"][@"com.example.app"] isEqual:(@[ @"Bar", @"Foo" ])]);
+    changed = [safe_mode turnOnTweak:@"Foo" inProcess:@"com.example.app" error:&enable_error];
+    CHECK([changed isEqualToArray:@[ @"com.example.app" ]]);
+    CHECK([read_plist(settings)[@"DisabledInProcesses"][@"com.example.app"] isEqual:@[ @"Bar" ]]);
+    // A tweak and a process must be named.
+    CHECK(![safe_mode turnOffTweak:@"" inProcess:@"com.example.app" changed:&off_changed error:&enable_error]);
+    CHECK(![safe_mode turnOffTweak:@"Foo" inProcess:@"" changed:&off_changed error:&enable_error]);
+    CHECK([BurrowSafeMode settingsAreValid:read_plist(settings)]);
+    CHECK(![BurrowSafeMode settingsAreValid:@{ @"DisabledInProcesses" : @{ @"com.example.app" : @"Foo" } }]);
+
     // Settings that are not valid are left alone.
     NSString *broken = [scratch stringByAppendingPathComponent:@"broken.plist"];
     write_plist(@[ @"not", @"a", @"dictionary" ], broken);
