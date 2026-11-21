@@ -76,8 +76,8 @@ Version: $version
 Architecture: $architecture
 Section: System
 Depends: firmware (>= 15.0)
-Maintainer: Nexus-jb
-Author: Nexus-jb
+Maintainer: Ultra Team
+Author: Ultra Team
 Homepage: https://github.com/Nexus-jb/burrow
 Description: Tweak injection platform (development build)
  This development build keeps a crash log of every crash with tweaks
