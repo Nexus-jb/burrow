@@ -294,14 +294,23 @@ static bool make_directories(const char *base, const char *const *names, size_t 
 static void test_roothide(const char *dir, const char *scratch, const char *target, const char *tweaks,
                           const char *shim) {
     char base[PATH_MAX], root[PATH_MAX], path[PATH_MAX], loader[PATH_MAX], built[PATH_MAX], elsewhere[PATH_MAX];
+    char tweaks_path[PATH_MAX], shim_path[PATH_MAX];
     checks++;
+    // The links in the stand-in root lead out of it, so they need absolute
+    // paths: the test directory may be given as a relative one.
+    if (!realpath(tweaks, tweaks_path) || !realpath(shim, shim_path)) {
+        failures++;
+        fprintf(stderr, "[loader] RootHide: cannot find the test tweaks: %s\n", strerror(errno));
+        return;
+    }
     const char *const layout[] = { "usr", "usr/lib", "usr/lib/burrow", "usr/lib/ellekit", "etc", "etc/burrow" };
     if (!join(base, scratch, "roothide") || mkdir(base, 0755) != 0 || !join(root, base, ".jbroot-0123456789ABCDEF") ||
         mkdir(root, 0755) != 0 || !make_directories(root, layout, sizeof layout / sizeof layout[0]) ||
         !join(built, dir, "BurrowLoaderRootHide.dylib") || !join(path, root, "usr/lib/burrow/BurrowLoader.dylib") ||
         !copy_file(built, path) || !join(path, root, "usr/lib/TweakLoader.dylib") ||
         symlink("burrow/BurrowLoader.dylib", path) != 0 || !join(path, root, "usr/lib/TweakInject") ||
-        symlink(tweaks, path) != 0 || !join(path, root, "usr/lib/ellekit/OldABI.dylib") || symlink(shim, path) != 0 ||
+        symlink(tweaks_path, path) != 0 || !join(path, root, "usr/lib/ellekit/OldABI.dylib") ||
+        symlink(shim_path, path) != 0 ||
         !join(loader, root, "usr/lib/TweakLoader.dylib")) {
         failures++;
         fprintf(stderr, "[loader] RootHide: cannot lay out the stand-in root: %s\n", strerror(errno));
