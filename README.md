@@ -36,10 +36,11 @@ works on real devices.
 
 | Scheme   | Package architecture | Examples                             |
 | -------- | -------------------- | ------------------------------------ |
-| rootless | `iphoneos-arm64`     | Dopamine, palera1n (rootless mode)   |
+| rootless | `iphoneos-arm64`     | Dopamine                             |
 | roothide | `iphoneos-arm64e`    | Dopamine (RootHide)                  |
 
-iOS 15 and later. Rootful jailbreaks are not planned for 1.0.
+iOS 15 and later. Rootful jailbreaks are not planned for 1.0. The
+development packages are built for rootless jailbreaks so far.
 
 Devices with an Apple A12 chip or newer: iPhone XS, iPhone XR and later.
 These are the arm64e chips, with pointer authentication. The package
@@ -85,6 +86,11 @@ To build them on a Mac with Xcode, ldid and dpkg:
 ```sh
 make ios-tests-package burrow-package PACKAGE_VERSION=0.0.0~dev.1
 ```
+
+If you use ElleKit, [docs/migrating-from-ellekit.md](docs/migrating-from-ellekit.md)
+explains how to switch to Burrow and back. If you make tweaks,
+[docs/api.md](docs/api.md) explains Burrow's functions and what Burrow does
+with your tweak.
 
 [docs/hooking.md](docs/hooking.md) explains how hooks are installed and which
 rules keep them safe. [docs/loader.md](docs/loader.md) explains how the loader
