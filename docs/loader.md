@@ -5,9 +5,10 @@ each tweak in the tweak directory whose filter matches that process, unless
 the user has turned the tweak off there. The source is `src/loader.c`.
 
 On a rootless jailbreak the tweak directory is `/var/jb/usr/lib/TweakInject`
-and the loader settings are `/var/jb/etc/burrow/loader.plist`. The loader is
-built and tested here; it replaces the jailbreak's own tweak loader in a
-later step of the work plan, together with Safe Mode.
+and the loader settings are `/var/jb/etc/burrow/loader.plist`. On RootHide
+they are the same paths in its hidden root (see [RootHide](#roothide)).
+`burrowctl loader burrow` makes it the jailbreak's tweak loader, as
+[Switching from ElleKit's loader](#switching-from-ellekits-loader) explains.
 
 ## Filters
 
@@ -130,6 +131,35 @@ before the loader only if the process loaded it first.
 A process with no tweaks in the tweak directory costs one directory read:
 the loader returns before it reads any property list.
 
+## RootHide
+
+RootHide keeps the jailbreak's files in a hidden directory with a random
+name, `/var/containers/Bundle/Application/.jbroot-<random>`, and has no
+`/var/jb`. Its jailbreak opens `usr/lib/TweakLoader.dylib` in that directory
+in every new process, as a rootless Dopamine opens `/var/jb/usr/lib/TweakLoader.dylib`.
+
+The RootHide package (`iphoneos-arm64e`) has the same files as the rootless
+one, built with `BURROW_ROOTHIDE`:
+
+- The loader, burrowd and burrowctl find the hidden root from where they
+  are: the path of their own file, up to the directory named `.jbroot-`,
+  first as the system opened it and then with its links followed
+  (`src/jbroot.c`). Outside such a directory the loader loads nothing, and
+  burrowd and burrowctl stop with a message.
+- RootHide's own tools, dpkg-divert, launchctl and the shell among them,
+  see the hidden root as `/`. The package's scripts, its launch daemon and
+  the paths burrowctl gives dpkg-divert therefore start at the hidden root,
+  and dpkg's file lists name files from it, which Safe Mode reads with the
+  hidden root put in front.
+- The links that switch the loader and the engine are relative, such as
+  `usr/lib/TweakLoader.dylib` to `burrow/BurrowLoader.dylib`, so that they
+  do not name the hidden root.
+
+The tests run the RootHide loader in a stand-in hidden root, and the switch
+and the package index on a copy of one. The `burrow-tests` package for
+RootHide hands the test programs real paths through RootHide's `jbroot`
+command.
+
 ## Switching from ElleKit's loader
 
 On a jailbreak that uses ElleKit, the Burrow package installs the loader
@@ -140,7 +170,8 @@ switches:
   `/var/jb/usr/lib/TweakLoader.dylib` aside to
   `/var/jb/usr/lib/TweakLoader.ellekit.dylib`, so that an ElleKit update
   does not put its loader back, and the path becomes a link to
-  `/var/jb/usr/lib/burrow/BurrowLoader.dylib`. The jailbreak loads it into
+  `/var/jb/usr/lib/burrow/BurrowLoader.dylib` (on RootHide, the same files
+  in its hidden root and a relative link). The jailbreak loads it into
   every new process. ElleKit stays the hooking engine.
 - It needs burrowd running, and starts a 15 minute trial.
 

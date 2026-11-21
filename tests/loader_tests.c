@@ -13,6 +13,7 @@
 #include <TargetConditionals.h>
 #include <dlfcn.h>
 #include <errno.h>
+#include <ftw.h>
 #include <libkern/OSByteOrder.h>
 #include <limits.h>
 #include <mach-o/fat.h>
@@ -22,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -243,6 +245,94 @@ static void test_old_abi(const char *loader, const char *scratch) {
     unlink(path);
 }
 
+static int remove_entry(const char *path, const struct stat *info, int type, struct FTW *walk) {
+    (void)info;
+    (void)type;
+    (void)walk;
+    return remove(path);
+}
+
+static void remove_tree(const char *path) {
+    nftw(path, remove_entry, 16, FTW_DEPTH | FTW_PHYS);
+}
+
+static bool copy_file(const char *from, const char *to) {
+    FILE *in = fopen(from, "rb");
+    if (!in) {
+        return false;
+    }
+    FILE *out = fopen(to, "wb");
+    if (!out) {
+        fclose(in);
+        return false;
+    }
+    char buffer[65536];
+    size_t count;
+    bool ok = true;
+    while ((count = fread(buffer, 1, sizeof buffer, in)) > 0) {
+        ok = ok && fwrite(buffer, 1, count, out) == count;
+    }
+    ok = ok && !ferror(in);
+    fclose(in);
+    return fclose(out) == 0 && ok && chmod(to, 0755) == 0;
+}
+
+static bool make_directories(const char *base, const char *const *names, size_t count) {
+    char path[PATH_MAX];
+    for (size_t i = 0; i < count; i++) {
+        if (!join(path, base, names[i]) || (mkdir(path, 0755) != 0 && errno != EEXIST)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// The loader as built for RootHide, in a stand-in for RootHide's hidden
+// root, opened the way RootHide's systemhook opens it: as
+// usr/lib/TweakLoader.dylib, a relative link to Burrow's loader. It finds
+// the tweaks and its settings in that root from its own path.
+static void test_roothide(const char *dir, const char *scratch, const char *target, const char *tweaks,
+                          const char *shim) {
+    char base[PATH_MAX], root[PATH_MAX], path[PATH_MAX], loader[PATH_MAX], built[PATH_MAX], elsewhere[PATH_MAX];
+    checks++;
+    const char *const layout[] = { "usr", "usr/lib", "usr/lib/burrow", "usr/lib/ellekit", "etc", "etc/burrow" };
+    if (!join(base, scratch, "roothide") || mkdir(base, 0755) != 0 || !join(root, base, ".jbroot-0123456789ABCDEF") ||
+        mkdir(root, 0755) != 0 || !make_directories(root, layout, sizeof layout / sizeof layout[0]) ||
+        !join(built, dir, "BurrowLoaderRootHide.dylib") || !join(path, root, "usr/lib/burrow/BurrowLoader.dylib") ||
+        !copy_file(built, path) || !join(path, root, "usr/lib/TweakLoader.dylib") ||
+        symlink("burrow/BurrowLoader.dylib", path) != 0 || !join(path, root, "usr/lib/TweakInject") ||
+        symlink(tweaks, path) != 0 || !join(path, root, "usr/lib/ellekit/OldABI.dylib") || symlink(shim, path) != 0 ||
+        !join(loader, root, "usr/lib/TweakLoader.dylib")) {
+        failures++;
+        fprintf(stderr, "[loader] RootHide: cannot lay out the stand-in root: %s\n", strerror(errno));
+        return;
+    }
+    // The test settings are for BurrowLoaderTesting only.
+    unsetenv("BURROW_TEST_TWEAK_DIRECTORY");
+    unsetenv("BURROW_TEST_LOADER_SETTINGS");
+    unsetenv("BURROW_TEST_OLD_ABI_SHIM");
+
+    expect("RootHide, no settings", "loader-target", target, loader, PLAIN_ALL);
+    char settings[PATH_MAX];
+    struct settings_case off = { "RootHide", "<dict><key>DisabledTweaks</key><array><string>NewCF</string></array></dict>",
+                                 true, NULL, NULL, NULL };
+    if (!join(settings, root, "etc/burrow/loader.plist") || !write_settings(settings, &off)) {
+        checks++;
+        failures++;
+        fprintf(stderr, "[loader] RootHide: cannot write the settings\n");
+    } else {
+        expect("RootHide, settings in the root", "loader-target", target, loader,
+               "zManager OldABI 000First AnyMode ClassFilter Executable OpenStep");
+    }
+    // Outside any .jbroot- directory there is no root, and nothing loads.
+    if (!join(elsewhere, base, "BurrowLoader.dylib") || !copy_file(built, elsewhere)) {
+        checks++;
+        failures++;
+        fprintf(stderr, "[loader] RootHide: cannot copy the loader\n");
+    } else {
+        expect("RootHide, outside the root", "loader-target", target, elsewhere, "");
+    }
+}
 
 int main(int argc, char **argv) {
     if (argc != 2) {
@@ -287,8 +377,9 @@ int main(int argc, char **argv) {
         unsetenv("BURROW_TEST_SET_VARIABLE");
     }
     unlink(settings);
+    test_roothide(dir, scratch, plain, tweaks, shim);
     test_old_abi(loader, scratch);
-    rmdir(scratch);
+    remove_tree(scratch);
 
     if (failures) {
         fprintf(stderr, "[loader] %u of %u checks failed\n", failures, checks);

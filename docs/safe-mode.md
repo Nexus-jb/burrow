@@ -138,7 +138,9 @@ and later the tweak's developer can see what happened. Each entry holds:
 - the date, the process and its bundle identifier;
 - the tweak to blame, if any, and every tweak that was loaded;
 - for each of those tweaks, the package that installed it and its version,
-  from the dpkg database (`/var/jb/var/lib/dpkg` on a rootless jailbreak);
+  from the dpkg database (`/var/jb/var/lib/dpkg` on a rootless jailbreak,
+  `var/lib/dpkg` in the hidden root on RootHide, whose lists name files
+  from that root);
 - the same one-line reason Safe Mode uses;
 - the system version and the device model;
 - a copy of the crash report, because the system deletes old ones.
@@ -221,7 +223,8 @@ burrowctl loader burrow|ellekit
                        (root only)
 ```
 
-The state lives in `/var/jb/var/lib/burrow`: `crashes/` for the crash log,
+The state lives in `/var/jb/var/lib/burrow` (on RootHide, `var/lib/burrow`
+in its hidden root): `crashes/` for the crash log,
 `safe-mode.plist` for Safe Mode, and `burrowd.plist` for what burrowd has
 read.
 

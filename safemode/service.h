@@ -13,12 +13,17 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy) NSArray<NSString *> *tweakDirectories;
 @property (nonatomic, copy) NSArray<NSString *> *jailbreakRoots;
 @property (nonatomic, copy) NSString *dpkgDirectory;
+// What the paths in dpkg's file lists are written from: empty when they are
+// paths on disk, as on a rootless jailbreak; RootHide's hidden root there,
+// whose dpkg lists /usr/lib/... for files in it. Empty to begin with.
+@property (nonatomic, copy) NSString *dpkgListRoot;
 @property (nonatomic, copy) NSString *settingsPath;
 @property (nonatomic, copy) NSString *safeModeStatePath;
 @property (nonatomic, copy) NSString *crashLogDirectory;
 
-// The paths on a rootless jailbreak, under /var/jb.
-+ (instancetype)rootlessPaths;
+// The paths on this build's jailbreak: under /var/jb, or under RootHide's
+// hidden root. The program checks BurrowJailbreakRoot() first.
++ (instancetype)systemPaths;
 @end
 
 @interface BurrowService : NSObject

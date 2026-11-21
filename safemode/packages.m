@@ -12,6 +12,7 @@ NSString *const BurrowPackageVersion = @"Version";
 
 @implementation BurrowPackageIndex {
     NSString *_directory;
+    NSString *_listRoot;
     NSDictionary<NSString *, NSString *> *_owners;                         // library path -> package
     NSDictionary<NSString *, NSString *> *_entryOwners;                    // the same, directory links followed
     NSDictionary<NSString *, NSString *> *_fileOwners;                     // the same, every link followed
@@ -19,9 +20,14 @@ NSString *const BurrowPackageVersion = @"Version";
 }
 
 - (instancetype)initWithDpkgDirectory:(NSString *)directory {
+    return [self initWithDpkgDirectory:directory listRoot:@""];
+}
+
+- (instancetype)initWithDpkgDirectory:(NSString *)directory listRoot:(NSString *)listRoot {
     self = [super init];
     if (self) {
         _directory = [directory copy];
+        _listRoot = [listRoot copy];
     }
     return self;
 }
@@ -65,6 +71,7 @@ static BOOL is_link(NSString *path) {
     NSMutableDictionary *fileOwners = [NSMutableDictionary dictionary];
     NSMutableDictionary<NSString *, NSString *> *directories = [NSMutableDictionary dictionary];
     NSString *info = [_directory stringByAppendingPathComponent:@"info"];
+    NSString *listRoot = _listRoot;
     for (NSString *name in [[NSFileManager defaultManager] contentsOfDirectoryAtPath:info error:NULL]) {
         if (![name hasSuffix:@".list"]) {
             continue;
@@ -74,11 +81,12 @@ static BOOL is_link(NSString *path) {
         NSString *list = [NSString stringWithContentsOfFile:[info stringByAppendingPathComponent:name]
                                                    encoding:NSUTF8StringEncoding
                                                       error:NULL];
-        [list enumerateLinesUsingBlock:^(NSString *line, BOOL *stop) {
+        [list enumerateLinesUsingBlock:^(NSString *listed, BOOL *stop) {
             (void)stop;
-            if (![line hasSuffix:@".dylib"]) {
+            if (![listed hasSuffix:@".dylib"]) {
                 return;
             }
+            NSString *line = [listRoot stringByAppendingString:listed];
             owners[line] = package;
             entryOwners[entry_path(line, directories)] = package;
             // When a link and its target are both listed, the package that

@@ -2,7 +2,7 @@
 //
 // burrowd: watches the crash report directories and hands every new report
 // to the crash log and, while Burrow's loader loads the tweaks, to Safe
-// Mode. launchd starts it from /var/jb/Library/LaunchDaemons.
+// Mode. launchd starts it from Library/LaunchDaemons in the jailbreak root.
 
 #import <Foundation/Foundation.h>
 
@@ -22,12 +22,16 @@ static const int64_t RescanSeconds = 300;
 
 int main(void) {
     @autoreleasepool {
-        BurrowServicePaths *paths = [BurrowServicePaths rootlessPaths];
+        if (!BurrowJailbreakRoot()) {
+            os_log_error(OS_LOG_DEFAULT, "burrowd: cannot find the jailbreak root");
+            return 1;
+        }
+        BurrowServicePaths *paths = [BurrowServicePaths systemPaths];
         [[NSFileManager defaultManager] createDirectoryAtPath:paths.crashLogDirectory
                                   withIntermediateDirectories:YES
                                                    attributes:nil
                                                         error:NULL];
-        [[NSString stringWithFormat:@"%d\n", getpid()] writeToFile:BurrowDaemonPIDPath
+        [[NSString stringWithFormat:@"%d\n", getpid()] writeToFile:BurrowDaemonPIDPath()
                                                           atomically:YES
                                                             encoding:NSUTF8StringEncoding
                                                                error:NULL];
@@ -39,11 +43,11 @@ int main(void) {
                 NSDate *since = BurrowLoaderActiveSince();
                 service.safeModeSince = since;
                 service.guardSince = since;
-                NSDictionary *trial = [NSDictionary dictionaryWithContentsOfFile:BurrowTrialPath];
+                NSDictionary *trial = [NSDictionary dictionaryWithContentsOfFile:BurrowTrialPath()];
                 service.guardTrialUntil = [trial[@"Until"] isKindOfClass:[NSDate class]] ? trial[@"Until"] : nil;
                 NSDate *engineSince = BurrowEngineActiveSince();
                 service.engineGuardSince = engineSince;
-                NSDictionary *engineTrial = [NSDictionary dictionaryWithContentsOfFile:BurrowEngineTrialPath];
+                NSDictionary *engineTrial = [NSDictionary dictionaryWithContentsOfFile:BurrowEngineTrialPath()];
                 service.engineTrialUntil =
                     [engineTrial[@"Until"] isKindOfClass:[NSDate class]] ? engineTrial[@"Until"] : nil;
                 NSUInteger logged = [service scan];
@@ -53,8 +57,8 @@ int main(void) {
                     NSError *error = nil;
                     if ([[BurrowSwitch systemSwitch] useElleKitLoader:&error]) {
                         os_log_error(OS_LOG_DEFAULT, "burrowd: back to ElleKit's loader: %{public}@", reason);
-                        [@{ @"Date" : [NSDate date], @"Reason" : reason } writeToFile:BurrowGuardPath atomically:YES];
-                        [[NSFileManager defaultManager] removeItemAtPath:BurrowTrialPath error:NULL];
+                        [@{ @"Date" : [NSDate date], @"Reason" : reason } writeToFile:BurrowGuardPath() atomically:YES];
+                        [[NSFileManager defaultManager] removeItemAtPath:BurrowTrialPath() error:NULL];
                     } else {
                         os_log_error(OS_LOG_DEFAULT, "burrowd: cannot go back to ElleKit's loader: %{public}@",
                                      error.localizedDescription);
@@ -67,9 +71,9 @@ int main(void) {
                     NSError *error = nil;
                     if ([[BurrowSwitch systemSwitch] useElleKitEngine:&error]) {
                         os_log_error(OS_LOG_DEFAULT, "burrowd: back to ElleKit's engine: %{public}@", reason);
-                        [@{ @"Date" : [NSDate date], @"Reason" : reason } writeToFile:BurrowEngineGuardPath
+                        [@{ @"Date" : [NSDate date], @"Reason" : reason } writeToFile:BurrowEngineGuardPath()
                                                                            atomically:YES];
-                        [[NSFileManager defaultManager] removeItemAtPath:BurrowEngineTrialPath error:NULL];
+                        [[NSFileManager defaultManager] removeItemAtPath:BurrowEngineTrialPath() error:NULL];
                     } else {
                         os_log_error(OS_LOG_DEFAULT, "burrowd: cannot go back to ElleKit's engine: %{public}@",
                                      error.localizedDescription);
@@ -85,7 +89,7 @@ int main(void) {
                                                                           format:NSPropertyListXMLFormat_v1_0
                                                                          options:0
                                                                            error:NULL];
-                [data writeToFile:BurrowDaemonStatisticsPath atomically:YES];
+                [data writeToFile:BurrowDaemonStatisticsPath() atomically:YES];
             }
         };
         __block BOOL pending = NO;

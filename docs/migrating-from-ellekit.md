@@ -12,8 +12,9 @@ developers.
 
 ## Before you start
 
-- A rootless jailbreak on iOS 15 or later, on an A12 chip or newer. The
-  Burrow package is built for rootless jailbreaks for now.
+- A rootless or RootHide jailbreak on iOS 15 or later, on an A12 chip or
+  newer. The RootHide package is next to be tried on a device. On RootHide
+  every `/var/jb` path below is the same path in its hidden root.
 - Install Burrow. It changes nothing yet: its daemon, `burrowd`, keeps the
   crash log.
 - Optionally, run `burrowctl check` as root. It reads every tweak and lists:

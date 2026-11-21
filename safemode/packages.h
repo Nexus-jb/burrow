@@ -14,7 +14,12 @@ extern NSString *const BurrowPackageVersion;
 @interface BurrowPackageIndex : NSObject
 
 // directory holds info/*.list and status, such as /var/jb/var/lib/dpkg.
+// The lists name files by their paths on disk.
 - (instancetype)initWithDpkgDirectory:(NSString *)directory;
+
+// The same, for lists that name files from listRoot: RootHide's dpkg lists
+// /usr/lib/... for a file in its hidden root.
+- (instancetype)initWithDpkgDirectory:(NSString *)directory listRoot:(NSString *)listRoot;
 
 // The installed package that owns the library at path, or nil. Links are
 // followed, so a library listed under a linked directory is found under the

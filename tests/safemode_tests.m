@@ -20,6 +20,8 @@
 #import "service.h"
 #import "switch.h"
 
+#include "jbroot.h"
+
 #include <errno.h>
 #include <fcntl.h>
 #include <libkern/OSByteOrder.h>
@@ -364,6 +366,40 @@ static void test_package_links(NSString *scratch) {
         isEqualToString:@"com.example.lonelib"]);
     CHECK([packages packageForLibrary:[inject stringByAppendingPathComponent:@"Other.dylib"]] == nil);
     CHECK([packages packageForLibrary:@""] == nil);
+}
+
+// RootHide's dpkg lists files from its hidden root, as /usr/lib/...; the
+// index finds them on disk under the root it is given.
+static void test_package_list_root(NSString *scratch) {
+    NSFileManager *files = [NSFileManager defaultManager];
+    NSString *root = [scratch stringByAppendingPathComponent:@"list-root/.jbroot-0123456789ABCDEF"];
+    NSString *dpkg = [root stringByAppendingPathComponent:@"var/lib/dpkg"];
+    NSString *inject = [root stringByAppendingPathComponent:@"usr/lib/TweakInject"];
+    for (NSString *directory in @[ [dpkg stringByAppendingPathComponent:@"info"], inject ]) {
+        [files createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:NULL];
+    }
+    [@"/.\n/usr\n/usr/lib\n/usr/lib/TweakInject\n/usr/lib/TweakInject/Hidden.dylib\n"
+        writeToFile:[dpkg stringByAppendingPathComponent:@"info/com.example.hidden.list"]
+         atomically:YES
+           encoding:NSUTF8StringEncoding
+              error:NULL];
+    [@"Package: com.example.hidden\nStatus: install ok installed\nVersion: 3.0\n\n"
+        writeToFile:[dpkg stringByAppendingPathComponent:@"status"]
+         atomically:YES
+           encoding:NSUTF8StringEncoding
+              error:NULL];
+    NSString *library = [inject stringByAppendingPathComponent:@"Hidden.dylib"];
+    [@"" writeToFile:library atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+
+    BurrowPackageIndex *hidden = [[BurrowPackageIndex alloc] initWithDpkgDirectory:dpkg listRoot:root];
+    CHECK([[hidden packageForLibrary:library][BurrowPackageVersion] isEqualToString:@"3.0"]);
+    // The same file by its real path, as crash reports name it.
+    char resolved[PATH_MAX];
+    CHECK(realpath(library.fileSystemRepresentation, resolved) &&
+          [[hidden packageForLibrary:@(resolved)][BurrowPackageIdentifier] isEqualToString:@"com.example.hidden"]);
+    // Read as paths on disk, the list names no file here.
+    BurrowPackageIndex *plain = [[BurrowPackageIndex alloc] initWithDpkgDirectory:dpkg];
+    CHECK([plain packageForLibrary:library] == nil);
 }
 
 static void test_crash_log(NSString *fixtures, NSString *dpkg, NSString *scratch) {
@@ -804,6 +840,90 @@ static void test_switch(NSString *scratch) {
     CHECK([loader_switch.engineOwner isEqualToString:@"ElleKit"]);
 }
 
+// The switch on RootHide: the file tree from the hidden root, dpkg-divert
+// naming that root as /, and links relative to their directory, which
+// still work when the root moves.
+static void test_roothide_switch(NSString *scratch) {
+    NSString *dpkg_divert = in_path(@"dpkg-divert");
+    if (!dpkg_divert) {
+        return;  // test_switch reported it
+    }
+    NSFileManager *files = [NSFileManager defaultManager];
+    NSString *root = [scratch stringByAppendingPathComponent:@"roothide-switch/.jbroot-0123456789ABCDEF"];
+    NSString *admin = [scratch stringByAppendingPathComponent:@"roothide-switch/dpkg"];
+    NSString *lib = [root stringByAppendingPathComponent:@"usr/lib"];
+    NSString *frameworks = [root stringByAppendingPathComponent:@"Library/Frameworks/CydiaSubstrate.framework"];
+    NSString *burrow_framework = [lib stringByAppendingPathComponent:@"burrow/CydiaSubstrate.framework"];
+    for (NSString *directory in @[ [lib stringByAppendingPathComponent:@"ellekit"], burrow_framework, frameworks, admin ]) {
+        [files createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:NULL];
+    }
+    [@"" writeToFile:[admin stringByAppendingPathComponent:@"diversions"] atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+    [@"ElleKit loader" writeToFile:[lib stringByAppendingPathComponent:@"ellekit/libinjector.dylib"]
+                        atomically:YES
+                          encoding:NSUTF8StringEncoding
+                             error:NULL];
+    [@"Burrow loader" writeToFile:[lib stringByAppendingPathComponent:@"burrow/BurrowLoader.dylib"]
+                       atomically:YES
+                         encoding:NSUTF8StringEncoding
+                            error:NULL];
+    [@"ElleKit engine" writeToFile:[lib stringByAppendingPathComponent:@"libellekit.dylib"]
+                        atomically:YES
+                          encoding:NSUTF8StringEncoding
+                             error:NULL];
+    [@"Burrow engine" writeToFile:[burrow_framework stringByAppendingPathComponent:@"CydiaSubstrate"]
+                       atomically:YES
+                         encoding:NSUTF8StringEncoding
+                            error:NULL];
+    NSString *loader = [lib stringByAppendingPathComponent:@"TweakLoader.dylib"];
+    NSString *substrate = [frameworks stringByAppendingPathComponent:@"CydiaSubstrate"];
+    NSString *libsubstrate = [lib stringByAppendingPathComponent:@"libsubstrate.dylib"];
+    [files createSymbolicLinkAtPath:loader withDestinationPath:@"ellekit/libinjector.dylib" error:NULL];
+    [files createSymbolicLinkAtPath:substrate withDestinationPath:@"../../../usr/lib/libellekit.dylib" error:NULL];
+    [files createSymbolicLinkAtPath:libsubstrate withDestinationPath:@"libellekit.dylib" error:NULL];
+
+    BurrowSwitch *hidden = [[BurrowSwitch alloc] initWithFiles:root
+                                                         tools:@""
+                                                 relativeLinks:YES
+                                                    dpkgDivert:@[ dpkg_divert, @"--admindir", admin, @"--instdir", root ]];
+    CHECK([hidden.loaderOwner isEqualToString:@"ElleKit"]);
+    CHECK([hidden.engineOwner isEqualToString:@"ElleKit"]);
+
+    NSError *error = nil;
+    BOOL switched = [hidden useBurrowLoader:&error] && [hidden useBurrowEngine:&error];
+    CHECK(switched);
+    if (!switched) {
+        fprintf(stderr, "[safemode]   RootHide: %s\n", error.localizedDescription.UTF8String);
+    }
+    CHECK([hidden.loaderOwner isEqualToString:@"Burrow"]);
+    CHECK([hidden.engineOwner isEqualToString:@"Burrow"]);
+    CHECK([[files destinationOfSymbolicLinkAtPath:loader error:NULL] isEqualToString:@"burrow/BurrowLoader.dylib"]);
+    CHECK([[files destinationOfSymbolicLinkAtPath:substrate error:NULL]
+        isEqualToString:@"../../../usr/lib/burrow/CydiaSubstrate.framework/CydiaSubstrate"]);
+    CHECK([[files destinationOfSymbolicLinkAtPath:libsubstrate error:NULL]
+        isEqualToString:@"burrow/CydiaSubstrate.framework/CydiaSubstrate"]);
+    // The links lead to Burrow's files, and the diverted ones to ElleKit's.
+    CHECK([[NSString stringWithContentsOfFile:loader encoding:NSUTF8StringEncoding error:NULL] isEqualToString:@"Burrow loader"]);
+    CHECK([[NSString stringWithContentsOfFile:substrate encoding:NSUTF8StringEncoding error:NULL] isEqualToString:@"Burrow engine"]);
+    CHECK([[NSString stringWithContentsOfFile:[lib stringByAppendingPathComponent:@"TweakLoader.ellekit.dylib"]
+                                     encoding:NSUTF8StringEncoding
+                                        error:NULL] isEqualToString:@"ElleKit loader"]);
+    CHECK([[NSString stringWithContentsOfFile:[frameworks stringByAppendingPathComponent:@"CydiaSubstrate.ellekit"]
+                                     encoding:NSUTF8StringEncoding
+                                        error:NULL] isEqualToString:@"ElleKit engine"]);
+
+    error = nil;
+    BOOL back = [hidden useElleKitLoader:&error] && [hidden useElleKitEngine:&error];
+    CHECK(back);
+    if (!back) {
+        fprintf(stderr, "[safemode]   RootHide: %s\n", error.localizedDescription.UTF8String);
+    }
+    CHECK([hidden.loaderOwner isEqualToString:@"ElleKit"]);
+    CHECK([hidden.engineOwner isEqualToString:@"ElleKit"]);
+    CHECK([[files destinationOfSymbolicLinkAtPath:loader error:NULL] isEqualToString:@"ellekit/libinjector.dylib"]);
+    CHECK([[files destinationOfSymbolicLinkAtPath:substrate error:NULL] isEqualToString:@"../../../usr/lib/libellekit.dylib"]);
+    CHECK([[files destinationOfSymbolicLinkAtPath:libsubstrate error:NULL] isEqualToString:@"libellekit.dylib"]);
+}
+
 // A thin 64-bit Mach-O library with the given cpusubtype and load
 // commands, each a command number and its string.
 static NSData *macho_library(uint32_t subtype, NSArray<NSArray *> *commands) {
@@ -1109,8 +1229,17 @@ static void test_real_crashes(NSString *dir, NSString *scratch) {
     if (real_path(tweaks)) {
         [directories addObject:real_path(tweaks)];
     }
-    if (real_path(@"/var/jb")) {
-        [roots addObjectsFromArray:@[ @"/var/jb", real_path(@"/var/jb") ]];
+    // The jailbreak this test package is installed on: RootHide's hidden
+    // root holds the tests themselves, and its dpkg lists files from it.
+    NSString *jailbreak = @"/var/jb";
+    NSString *list_root = @"";
+    char hidden[PATH_MAX];
+    if (burrow_roothide_root(dir.fileSystemRepresentation, hidden, sizeof hidden)) {
+        jailbreak = @(hidden);
+        list_root = jailbreak;
+    }
+    if (real_path(jailbreak)) {
+        [roots addObjectsFromArray:@[ jailbreak, real_path(jailbreak) ]];
     }
     BurrowCrashAnalyzer *analyzer = [[BurrowCrashAnalyzer alloc] initWithTweakDirectories:directories
                                                                            jailbreakRoots:roots];
@@ -1119,9 +1248,10 @@ static void test_real_crashes(NSString *dir, NSString *scratch) {
     // On a jailbroken device the test tweaks were installed by this test
     // package. Elsewhere, a dpkg database is made up for them.
     NSString *package = @"com.nexusjb.burrow-tests";
-    NSString *dpkg = @"/var/jb/var/lib/dpkg";
+    NSString *dpkg = [jailbreak stringByAppendingPathComponent:@"var/lib/dpkg"];
     if (![[NSFileManager defaultManager] fileExistsAtPath:[dpkg stringByAppendingPathComponent:@"status"]]) {
         package = @"com.nexusjb.crash-tests";
+        list_root = @"";
         dpkg = [scratch stringByAppendingPathComponent:@"dpkg"];
         [[NSFileManager defaultManager] createDirectoryAtPath:[dpkg stringByAppendingPathComponent:@"info"]
                                   withIntermediateDirectories:YES
@@ -1144,7 +1274,7 @@ static void test_real_crashes(NSString *dir, NSString *scratch) {
     BurrowCrashLog *log = [[BurrowCrashLog alloc]
         initWithDirectory:[scratch stringByAppendingPathComponent:@"crash-target-log"]
                  analyzer:analyzer
-                 packages:[[BurrowPackageIndex alloc] initWithDpkgDirectory:dpkg]];
+                 packages:[[BurrowPackageIndex alloc] initWithDpkgDirectory:dpkg listRoot:list_root]];
 
     NSMutableSet *seen = [NSMutableSet set];
     // Tweaks load by name: Innocent, then SegvTweak, then ThrowTweak.
@@ -1174,6 +1304,7 @@ int main(int argc, char **argv) {
         NSString *scratch = @(scratch_template);
         test_fixtures([dir stringByAppendingPathComponent:@"safemode-fixtures"], scratch);
         test_package_links(scratch);
+        test_package_list_root(scratch);
         test_crash_log([dir stringByAppendingPathComponent:@"safemode-fixtures"],
                        [dir stringByAppendingPathComponent:@"safemode-dpkg"], scratch);
         test_crash_json([dir stringByAppendingPathComponent:@"safemode-fixtures"],
@@ -1185,6 +1316,7 @@ int main(int argc, char **argv) {
         test_engine_guard([dir stringByAppendingPathComponent:@"safemode-fixtures"],
                           [dir stringByAppendingPathComponent:@"safemode-dpkg"], scratch);
         test_switch(scratch);
+        test_roothide_switch(scratch);
         test_inspect(scratch);
         test_real_crashes(dir, scratch);
         [[NSFileManager defaultManager] removeItemAtPath:scratch error:NULL];

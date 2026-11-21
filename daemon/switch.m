@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #import "switch.h"
+#import "state.h"
 
 #include <errno.h>
 #include <spawn.h>
@@ -11,22 +12,41 @@
 
 extern char **environ;
 
-static NSString *const SystemLoader = @"/var/jb/usr/lib/TweakLoader.dylib";
-static NSString *const DivertedLoader = @"/var/jb/usr/lib/TweakLoader.ellekit.dylib";
-static NSString *const BurrowLoader = @"/var/jb/usr/lib/burrow/BurrowLoader.dylib";
-static NSString *const BurrowEngine = @"/var/jb/usr/lib/burrow/CydiaSubstrate.framework/CydiaSubstrate";
+// Paths from the jailbreak root.
+static NSString *const SystemLoader = @"/usr/lib/TweakLoader.dylib";
+static NSString *const DivertedLoader = @"/usr/lib/TweakLoader.ellekit.dylib";
+static NSString *const BurrowLoader = @"/usr/lib/burrow/BurrowLoader.dylib";
+static NSString *const BurrowEngine = @"/usr/lib/burrow/CydiaSubstrate.framework/CydiaSubstrate";
 static NSString *const Package = @"com.nexusjb.burrow";
 
 // The hooking engine's files that ElleKit's package installs, all links to
 // its libellekit.dylib, each with the path it is diverted to.
 static NSArray<NSArray<NSString *> *> *engine_files(void) {
     return @[
-        @[ @"/var/jb/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate",
-           @"/var/jb/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate.ellekit" ],
-        @[ @"/var/jb/usr/lib/libsubstrate.dylib", @"/var/jb/usr/lib/libsubstrate.ellekit.dylib" ],
-        @[ @"/var/jb/usr/lib/libhooker.dylib", @"/var/jb/usr/lib/libhooker.ellekit.dylib" ],
-        @[ @"/var/jb/usr/lib/libblackjack.dylib", @"/var/jb/usr/lib/libblackjack.ellekit.dylib" ],
+        @[ @"/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate",
+           @"/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate.ellekit" ],
+        @[ @"/usr/lib/libsubstrate.dylib", @"/usr/lib/libsubstrate.ellekit.dylib" ],
+        @[ @"/usr/lib/libhooker.dylib", @"/usr/lib/libhooker.ellekit.dylib" ],
+        @[ @"/usr/lib/libblackjack.dylib", @"/usr/lib/libblackjack.ellekit.dylib" ],
     ];
+}
+
+// target as a link at link names it from the link's directory, such as
+// burrow/BurrowLoader.dylib for /usr/lib/TweakLoader.dylib. Both are paths
+// from the same root.
+static NSString *relative_target(NSString *link, NSString *target) {
+    NSArray<NSString *> *from = link.stringByDeletingLastPathComponent.pathComponents;
+    NSArray<NSString *> *to = target.pathComponents;
+    NSUInteger common = 0;
+    while (common < from.count && common + 1 < to.count && [from[common] isEqualToString:to[common]]) {
+        common++;
+    }
+    NSMutableArray<NSString *> *parts = [NSMutableArray array];
+    for (NSUInteger i = common; i < from.count; i++) {
+        [parts addObject:@".."];
+    }
+    [parts addObjectsFromArray:[to subarrayWithRange:NSMakeRange(common, to.count - common)]];
+    return [parts componentsJoinedByString:@"/"];
 }
 
 static NSError *switch_error(NSString *description) {
@@ -70,25 +90,56 @@ static int run(NSArray<NSString *> *arguments, NSString **output) {
 }
 
 @implementation BurrowSwitch {
-    NSString *_root;
+    NSString *_files;
+    NSString *_tools;
+    BOOL _relativeLinks;
     NSArray<NSString *> *_dpkgDivert;
 }
 
-- (instancetype)initWithRoot:(NSString *)root dpkgDivert:(NSArray<NSString *> *)dpkgDivert {
+- (instancetype)initWithFiles:(NSString *)files
+                        tools:(NSString *)tools
+                relativeLinks:(BOOL)relativeLinks
+                   dpkgDivert:(NSArray<NSString *> *)dpkgDivert {
     self = [super init];
     if (self) {
-        _root = [root copy];
+        _files = [files copy];
+        _tools = [tools copy];
+        _relativeLinks = relativeLinks;
         _dpkgDivert = [dpkgDivert copy];
     }
     return self;
 }
 
+- (instancetype)initWithRoot:(NSString *)root dpkgDivert:(NSArray<NSString *> *)dpkgDivert {
+    return [self initWithFiles:[root stringByAppendingString:@"/var/jb"]
+                         tools:@"/var/jb"
+                 relativeLinks:NO
+                    dpkgDivert:dpkgDivert];
+}
+
 + (instancetype)systemSwitch {
-    return [[self alloc] initWithRoot:@"" dpkgDivert:@[ @"/var/jb/usr/bin/dpkg-divert" ]];
+    NSString *dpkgDivert = BurrowJailbreakPath(@"/usr/bin/dpkg-divert");
+#ifdef BURROW_ROOTHIDE
+    // RootHide's tools see the hidden root as /, and a link that names it
+    // would break when the root moves, so links are relative.
+    return [[self alloc] initWithFiles:BurrowJailbreakRoot() tools:@"" relativeLinks:YES dpkgDivert:@[ dpkgDivert ]];
+#else
+    return [[self alloc] initWithFiles:@"/var/jb" tools:@"/var/jb" relativeLinks:NO dpkgDivert:@[ dpkgDivert ]];
+#endif
 }
 
 - (NSString *)onDisk:(NSString *)path {
-    return [_root stringByAppendingString:path];
+    return [_files stringByAppendingString:path];
+}
+
+// The path as dpkg-divert names it.
+- (NSString *)forTools:(NSString *)path {
+    return [_tools stringByAppendingString:path];
+}
+
+// What a link at path to target holds.
+- (NSString *)linkFrom:(NSString *)path to:(NSString *)target {
+    return _relativeLinks ? relative_target(path, target) : [self forTools:target];
 }
 
 // The file a link at path points to, one level, on disk.
@@ -106,7 +157,7 @@ static int run(NSArray<NSString *> *arguments, NSString **output) {
     if (!target) {
         return [files fileExistsAtPath:[self onDisk:path]] ? [self onDisk:path] : @"none";
     }
-    if ([target isEqualToString:burrow]) {
+    if ([target isEqualToString:[self linkFrom:path to:burrow]]) {
         return @"Burrow";
     }
     if ([target.lowercaseString containsString:@"ellekit"]) {
@@ -145,15 +196,15 @@ static int run(NSArray<NSString *> *arguments, NSString **output) {
 - (BOOL)divertedByBurrow:(NSString *)path {
     NSString *output = nil;
     NSMutableArray *command = [_dpkgDivert mutableCopy];
-    [command addObjectsFromArray:@[ @"--listpackage", path ]];
+    [command addObjectsFromArray:@[ @"--listpackage", [self forTools:path] ]];
     return run(command, &output) == 0 &&
            [[output stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] isEqualToString:Package];
 }
 
 - (BOOL)divert:(BOOL)add path:(NSString *)path to:(NSString *)diverted error:(NSError **)error {
     NSMutableArray *command = [_dpkgDivert mutableCopy];
-    [command addObjectsFromArray:@[ @"--package", Package, @"--rename", @"--divert", diverted,
-                                    add ? @"--add" : @"--remove", path ]];
+    [command addObjectsFromArray:@[ @"--package", Package, @"--rename", @"--divert", [self forTools:diverted],
+                                    add ? @"--add" : @"--remove", [self forTools:path] ]];
     NSString *output = nil;
     if (run(command, &output) != 0) {
         if (error) {
@@ -178,7 +229,7 @@ static int run(NSArray<NSString *> *arguments, NSString **output) {
     NSString *onDisk = [self onDisk:path];
     NSString *staged = [onDisk stringByAppendingString:@".burrow-new"];
     unlink(staged.fileSystemRepresentation);
-    if (symlink(burrow.fileSystemRepresentation, staged.fileSystemRepresentation) != 0 ||
+    if (symlink([self linkFrom:path to:burrow].fileSystemRepresentation, staged.fileSystemRepresentation) != 0 ||
         rename(staged.fileSystemRepresentation, onDisk.fileSystemRepresentation) != 0) {
         NSString *reason = @(strerror(errno));
         unlink(staged.fileSystemRepresentation);

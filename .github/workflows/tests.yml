@@ -20,8 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - run: make test-relocation
-      - run: make test-relocation BUILD=build/sanitized SANITIZE=1
+      - run: make test-relocation test-jbroot
+      - run: make test-relocation test-jbroot BUILD=build/sanitized SANITIZE=1
 
   linux-arm64:
     name: Linux arm64 (${{ matrix.name }})
@@ -94,7 +94,28 @@ jobs:
             dpkg-deb --contents "$deb"
           done
           # The Burrow package carries the chip check as its preinst.
-          dpkg-deb --ctrl-tarfile build/packages/com.nexusjb.burrow_*.deb | tar -tf - | grep -Eq '^(\./)?preinst$'
+          for deb in build/packages/com.nexusjb.burrow_*.deb; do
+            dpkg-deb --ctrl-tarfile "$deb" | tar -tf - | grep -Eq '^(\./)?preinst$'
+          done
+          # RootHide's package: files in the hidden root, which its tools
+          # and launchctl see as /, so nothing under /var/jb.
+          roothide=$(ls build/packages/com.nexusjb.burrow_*_iphoneos-arm64e.deb)
+          if dpkg-deb --contents "$roothide" | grep -q '/var/jb'; then
+            echo "The RootHide package has files under /var/jb" >&2
+            exit 1
+          fi
+          mkdir -p build/roothide-package
+          dpkg-deb -R "$roothide" build/roothide-package
+          for script in preinst postinst prerm postrm; do
+            head -n 1 "build/roothide-package/DEBIAN/$script" | grep -qx '#!/bin/sh'
+          done
+          if grep -rq '/var/jb' build/roothide-package/DEBIAN build/roothide-package/Library; then
+            echo "The RootHide package's scripts name /var/jb" >&2
+            exit 1
+          fi
+          grep -q '<string>/usr/libexec/burrow/burrowd</string>' \
+            build/roothide-package/Library/LaunchDaemons/com.nexusjb.burrowd.plist
+          lipo -info build/ios-universal-roothide/*
           sh tests/preinst_tests.sh
           ldid -e build/ios/arm64e/hook-tests
           lipo -info build/ios/arm64/hook-tests build/ios/arm64e/hook-tests build/ios/BurrowSampleTweak.dylib

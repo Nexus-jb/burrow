@@ -1,26 +1,53 @@
 #!/bin/sh
 # SPDX-License-Identifier: Apache-2.0
 #
-# Packages Burrow for a rootless jailbreak:
+# Packages Burrow for a rootless jailbreak or for RootHide:
 #
-#   scripts/package-burrow.sh <build-dir> <version> <out-dir>
+#   scripts/package-burrow.sh <build-dir> <version> <out-dir> [rootless|roothide]
 #
 # <build-dir> holds the universal (arm64 and arm64e) BurrowLoader.dylib,
-# CydiaSubstrate, burrowd and burrowctl. This package installs Burrow
-# beside the jailbreak's own tweak loader and changes nothing the system
-# uses: burrowd keeps the crash log, and burrowctl shows it.
+# CydiaSubstrate, burrowd and burrowctl, built for that scheme. This package
+# installs Burrow beside the jailbreak's own tweak loader and changes
+# nothing the system uses: burrowd keeps the crash log, and burrowctl shows
+# it.
+#
+# rootless (iphoneos-arm64): the files go under /var/jb, which every path in
+# the package names. roothide (iphoneos-arm64e): the files go into the hidden
+# root, which RootHide's dpkg, launchctl and shell see as /, so the paths in
+# the scripts and the launch daemon start there; the links the scripts check
+# are relative, as burrowctl makes them there.
 
 set -eu
 
-if [ "$#" -ne 3 ]; then
-    echo "usage: $0 <build-dir> <version> <out-dir>" >&2
+if [ "$#" -ne 3 ] && [ "$#" -ne 4 ]; then
+    echo "usage: $0 <build-dir> <version> <out-dir> [rootless|roothide]" >&2
     exit 2
 fi
 build=$1
 version=$2
 out=$3
+scheme=${4:-rootless}
 package=com.nexusjb.burrow
-architecture=iphoneos-arm64
+case "$scheme" in
+    rootless)
+        architecture=iphoneos-arm64
+        jb=/var/jb
+        loader_link=/var/jb/usr/lib/burrow/BurrowLoader.dylib
+        framework_link=/var/jb/usr/lib/burrow/CydiaSubstrate.framework/CydiaSubstrate
+        library_link=$framework_link
+        ;;
+    roothide)
+        architecture=iphoneos-arm64e
+        jb=
+        loader_link=burrow/BurrowLoader.dylib
+        framework_link=../../../usr/lib/burrow/CydiaSubstrate.framework/CydiaSubstrate
+        library_link=burrow/CydiaSubstrate.framework/CydiaSubstrate
+        ;;
+    *)
+        echo "unknown scheme: $scheme" >&2
+        exit 2
+        ;;
+esac
 
 if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+(\.[0-9]+){1,3}([~+][0-9A-Za-z.]+)?$'; then
     echo "invalid version: $version" >&2
@@ -36,7 +63,7 @@ done
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 chmod 0755 "$stage"
-root="$stage/var/jb"
+root="$stage$jb"
 mkdir -p "$root/usr/lib/burrow/CydiaSubstrate.framework" "$root/usr/libexec/burrow" "$root/usr/bin" \
     "$root/Library/LaunchDaemons" "$root/usr/share/doc/burrow" "$stage/DEBIAN"
 install -m 0755 "$build/BurrowLoader.dylib" "$root/usr/lib/burrow/BurrowLoader.dylib"
@@ -45,7 +72,7 @@ install -m 0755 "$build/burrowd" "$root/usr/libexec/burrow/burrowd"
 install -m 0755 "$build/burrowctl" "$root/usr/bin/burrowctl"
 install -m 0644 LICENSE "$root/usr/share/doc/burrow/LICENSE"
 
-cat > "$root/Library/LaunchDaemons/com.nexusjb.burrowd.plist" <<'PLIST'
+cat > "$root/Library/LaunchDaemons/com.nexusjb.burrowd.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -54,7 +81,7 @@ cat > "$root/Library/LaunchDaemons/com.nexusjb.burrowd.plist" <<'PLIST'
 	<string>com.nexusjb.burrowd</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/var/jb/usr/libexec/burrow/burrowd</string>
+		<string>$jb/usr/libexec/burrow/burrowd</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
@@ -86,57 +113,57 @@ Description: Tweak injection platform (development build)
  and "burrowctl loader ellekit" switches back. Run burrowctl status.
 CONTROL
 
-# The preinst refuses chips older than the A12.
-install -m 0755 scripts/preinst.sh "$stage/DEBIAN/preinst"
-cat > "$stage/DEBIAN/postinst" <<'SCRIPT'
-#!/var/jb/bin/sh
+# The preinst refuses chips older than the A12. It is written for /var/jb;
+# on RootHide its paths start at the hidden root.
+sed "s|/var/jb|$jb|g" scripts/preinst.sh > "$stage/DEBIAN/preinst"
+chmod 0755 "$stage/DEBIAN/preinst"
+cat > "$stage/DEBIAN/postinst" <<SCRIPT
+#!$jb/bin/sh
 # SPDX-License-Identifier: Apache-2.0
-mkdir -p /var/jb/var/lib/burrow/crashes /var/jb/etc/burrow
+mkdir -p $jb/var/lib/burrow/crashes $jb/etc/burrow
 # The prerm stops burrowd. When dpkg backs out of an upgrade or a removal,
 # as when the new version's preinst refuses the device, burrowd starts again.
-case "$1" in
+case "\$1" in
     configure | abort-upgrade | abort-remove | abort-deconfigure)
-        launchctl unload /var/jb/Library/LaunchDaemons/com.nexusjb.burrowd.plist >/dev/null 2>&1 || true
-        launchctl load -w /var/jb/Library/LaunchDaemons/com.nexusjb.burrowd.plist || true
+        launchctl unload $jb/Library/LaunchDaemons/com.nexusjb.burrowd.plist >/dev/null 2>&1 || true
+        launchctl load -w $jb/Library/LaunchDaemons/com.nexusjb.burrowd.plist || true
         ;;
 esac
 exit 0
 SCRIPT
-cat > "$stage/DEBIAN/prerm" <<'SCRIPT'
-#!/var/jb/bin/sh
+cat > "$stage/DEBIAN/prerm" <<SCRIPT
+#!$jb/bin/sh
 # SPDX-License-Identifier: Apache-2.0
 # Removing Burrow gives the hooking engine and the tweak loader back to
 # ElleKit first.
-if [ "$1" = remove ] || [ "$1" = deconfigure ]; then
-    /var/jb/usr/bin/burrowctl engine ellekit >/dev/null 2>&1 || true
-    /var/jb/usr/bin/burrowctl loader ellekit >/dev/null 2>&1 || true
+if [ "\$1" = remove ] || [ "\$1" = deconfigure ]; then
+    $jb/usr/bin/burrowctl engine ellekit >/dev/null 2>&1 || true
+    $jb/usr/bin/burrowctl loader ellekit >/dev/null 2>&1 || true
 fi
-launchctl unload /var/jb/Library/LaunchDaemons/com.nexusjb.burrowd.plist >/dev/null 2>&1 || true
+launchctl unload $jb/Library/LaunchDaemons/com.nexusjb.burrowd.plist >/dev/null 2>&1 || true
 exit 0
 SCRIPT
-cat > "$stage/DEBIAN/postrm" <<'SCRIPT'
-#!/var/jb/bin/sh
+cat > "$stage/DEBIAN/postrm" <<SCRIPT
+#!$jb/bin/sh
 # SPDX-License-Identifier: Apache-2.0
 # In case burrowctl could not run: no link to a removed loader or engine is
 # left, and ElleKit's files are back.
 undo() {
-    if [ -L "$1" ] && [ "$(readlink "$1")" = "$3" ]; then
-        rm -f "$1"
+    if [ -L "\$1" ] && [ "\$(readlink "\$1")" = "\$3" ]; then
+        rm -f "\$1"
     fi
-    dpkg-divert --package com.nexusjb.burrow --rename --divert "$2" --remove "$1" >/dev/null 2>&1 || true
+    dpkg-divert --package com.nexusjb.burrow --rename --divert "\$2" --remove "\$1" >/dev/null 2>&1 || true
 }
-if [ "$1" = remove ] || [ "$1" = purge ]; then
-    engine=/var/jb/usr/lib/burrow/CydiaSubstrate.framework/CydiaSubstrate
-    undo /var/jb/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate \
-        /var/jb/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate.ellekit "$engine"
+if [ "\$1" = remove ] || [ "\$1" = purge ]; then
+    undo $jb/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate \\
+        $jb/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate.ellekit $framework_link
     for library in libsubstrate libhooker libblackjack; do
-        undo "/var/jb/usr/lib/$library.dylib" "/var/jb/usr/lib/$library.ellekit.dylib" "$engine"
+        undo "$jb/usr/lib/\$library.dylib" "$jb/usr/lib/\$library.ellekit.dylib" $library_link
     done
-    undo /var/jb/usr/lib/TweakLoader.dylib /var/jb/usr/lib/TweakLoader.ellekit.dylib \
-        /var/jb/usr/lib/burrow/BurrowLoader.dylib
+    undo $jb/usr/lib/TweakLoader.dylib $jb/usr/lib/TweakLoader.ellekit.dylib $loader_link
 fi
-if [ "$1" = purge ]; then
-    rm -rf /var/jb/var/lib/burrow
+if [ "\$1" = purge ]; then
+    rm -rf $jb/var/lib/burrow
 fi
 exit 0
 SCRIPT

@@ -20,7 +20,8 @@ works on real devices.
 - **Compatibility with existing tweaks** through the Substrate API
   (`MSHookFunction`, `MSHookMessageEx`, `MSFindSymbol`, `MSGetImageByName`) and
   the libhooker API.
-- **Filter-based loading** from `/var/jb/usr/lib/TweakInject`, using the same
+- **Filter-based loading** from `usr/lib/TweakInject` in the jailbreak root
+  (`/var/jb`, or RootHide's hidden root), using the same
   property list filters tweaks ship today (bundles, executables and classes).
 - **Per-app control**, so you can turn tweaks off for a single app, such as a
   banking app.
@@ -40,7 +41,10 @@ works on real devices.
 | roothide | `iphoneos-arm64e`    | Dopamine (RootHide)                  |
 
 iOS 15 and later. Rootful jailbreaks are not planned for 1.0. The
-development packages are built for rootless jailbreaks so far.
+development packages are built for both schemes. The RootHide package is
+built and tested on a stand-in for RootHide's hidden root, and is next to be
+tried on a RootHide device; [docs/loader.md](docs/loader.md#roothide)
+explains what differs there.
 
 Devices with an Apple A12 chip or newer: iPhone XS, iPhone XR and later.
 These are the arm64e chips, with pointer authentication. The package
@@ -73,7 +77,8 @@ make ios-tests-package PACKAGE_VERSION=0.0.0~dev.1
 
 ### Development builds on a device
 
-Every CI run builds two rootless packages for a jailbroken device:
+Every CI run builds two packages for a jailbroken device, each for rootless
+jailbreaks (`iphoneos-arm64`) and for RootHide (`iphoneos-arm64e`):
 
 - `com.nexusjb.burrow`, Burrow itself. For now it installs beside the
   jailbreak's own tweak loader and changes nothing the system uses: its

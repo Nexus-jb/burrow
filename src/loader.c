@@ -37,11 +37,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "jbroot.h"
 #include "pac.h"
-
-#ifndef BURROW_JBROOT
-#define BURROW_JBROOT "/var/jb"
-#endif
 
 enum {
     MAX_PROPERTY_LIST_SIZE = 1024 * 1024,
@@ -743,6 +740,14 @@ static bool safe_mode_requested(void) {
     return false;
 }
 
+#ifndef BURROW_LOADER_TESTING
+// out = root followed by path, when it fits.
+static bool join_path(char out[PATH_MAX], const char *root, const char *path) {
+    int length = snprintf(out, PATH_MAX, "%s%s", root, path);
+    return length > 0 && length < PATH_MAX;
+}
+#endif
+
 __attribute__((constructor)) static void burrow_loader_start(void) {
     if (safe_mode_requested()) {
         return;
@@ -756,10 +761,20 @@ __attribute__((constructor)) static void burrow_loader_start(void) {
         return;
     }
 #else
-    const char *directory = BURROW_JBROOT "/usr/lib/TweakInject";
-    const char *settings = BURROW_JBROOT "/etc/burrow/loader.plist";
-    // Where ElleKit's loader looks for it.
-    const char *old_abi_shim = BURROW_JBROOT "/usr/lib/ellekit/OldABI.dylib";
+    // /var/jb, or the hidden root on RootHide. Without it there is nothing
+    // to load.
+    char root[PATH_MAX];
+    char directory[PATH_MAX], settings[PATH_MAX], old_abi_shim[PATH_MAX];
+    if (!burrow_jailbreak_root(root, sizeof root)) {
+        os_log_error(OS_LOG_DEFAULT, "Burrow: cannot find the jailbreak root; no tweaks loaded");
+        return;
+    }
+    // Where ElleKit's loader looks for the shim.
+    if (!join_path(directory, root, "/usr/lib/TweakInject") || !join_path(settings, root, "/etc/burrow/loader.plist") ||
+        !join_path(old_abi_shim, root, "/usr/lib/ellekit/OldABI.dylib")) {
+        os_log_error(OS_LOG_DEFAULT, "Burrow: the jailbreak root's path is too long; no tweaks loaded");
+        return;
+    }
 #endif
     load_tweaks(directory, settings, old_abi_shim);
 }

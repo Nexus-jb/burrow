@@ -7,6 +7,7 @@
 #import "crash_report.h"
 #import "packages.h"
 #import "safe_mode.h"
+#import "state.h"
 
 #include <limits.h>
 #include <os/log.h>
@@ -27,16 +28,27 @@ static NSArray<NSString *> *with_real_path(NSString *path) {
 
 @implementation BurrowServicePaths
 
-+ (instancetype)rootlessPaths {
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        _dpkgListRoot = @"";
+    }
+    return self;
+}
+
++ (instancetype)systemPaths {
     BurrowServicePaths *paths = [[BurrowServicePaths alloc] init];
     // Reports for every process, root's included, go here.
     paths.reportDirectories = @[ @"/var/mobile/Library/Logs/CrashReporter" ];
-    paths.tweakDirectories = with_real_path(@"/var/jb/usr/lib/TweakInject");
-    paths.jailbreakRoots = with_real_path(@"/var/jb");
-    paths.dpkgDirectory = @"/var/jb/var/lib/dpkg";
-    paths.settingsPath = @"/var/jb/etc/burrow/loader.plist";
-    paths.safeModeStatePath = @"/var/jb/var/lib/burrow/safe-mode.plist";
-    paths.crashLogDirectory = @"/var/jb/var/lib/burrow/crashes";
+    paths.tweakDirectories = with_real_path(BurrowJailbreakPath(@"/usr/lib/TweakInject"));
+    paths.jailbreakRoots = with_real_path(BurrowJailbreakRoot());
+    paths.dpkgDirectory = BurrowJailbreakPath(@"/var/lib/dpkg");
+#ifdef BURROW_ROOTHIDE
+    paths.dpkgListRoot = BurrowJailbreakRoot();
+#endif
+    paths.settingsPath = BurrowJailbreakPath(@"/etc/burrow/loader.plist");
+    paths.safeModeStatePath = BurrowJailbreakPath(@"/var/lib/burrow/safe-mode.plist");
+    paths.crashLogDirectory = BurrowJailbreakPath(@"/var/lib/burrow/crashes");
     return paths;
 }
 
@@ -157,7 +169,8 @@ static BOOL outside_images(BurrowCrashFrame *frame) {
     BurrowCrashLog *log = [[BurrowCrashLog alloc]
         initWithDirectory:_paths.crashLogDirectory
                  analyzer:analyzer
-                 packages:[[BurrowPackageIndex alloc] initWithDpkgDirectory:_paths.dpkgDirectory]];
+                 packages:[[BurrowPackageIndex alloc] initWithDpkgDirectory:_paths.dpkgDirectory
+                                                                 listRoot:_paths.dpkgListRoot]];
     BurrowSafeMode *safe_mode = [[BurrowSafeMode alloc] initWithAnalyzer:analyzer
                                                             settingsPath:_paths.settingsPath
                                                                statePath:_paths.safeModeStatePath];

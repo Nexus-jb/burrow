@@ -58,6 +58,13 @@ mkdir -p "$out/TweakInject"
     -o "$out/BurrowLoaderTesting.dylib" -framework CoreFoundation -lobjc
 sign "$out/BurrowLoaderTesting.dylib"
 
+# The loader as built for RootHide: it finds the jailbreak root from where
+# it is (src/jbroot.h). loader-tests copies it into a stand-in root.
+"$@" $flags -DBURROW_ROOTHIDE -fvisibility=hidden -dynamiclib \
+    -install_name @rpath/BurrowLoader.dylib src/loader.c src/jbroot.c \
+    -o "$out/BurrowLoaderRootHide.dylib" -framework CoreFoundation -lobjc
+sign "$out/BurrowLoaderRootHide.dylib"
+
 for tweak in $tweaks; do
     # shellcheck disable=SC2086
     "$@" $flags -dynamiclib -DBURROW_TWEAK_NAME="\"$tweak\"" -install_name "@rpath/$tweak.dylib" \
@@ -136,6 +143,7 @@ cp tests/safemode/fixtures/*.ips "$out/safemode-fixtures/"
 cp -R tests/safemode/dpkg "$out/safemode-dpkg"
 # shellcheck disable=SC2086
 "$@" $flags -fobjc-arc -Isafemode -Idaemon tests/safemode_tests.m safemode/*.m daemon/switch.m daemon/inspect.m \
+    daemon/state.m src/jbroot.c \
     -o "$out/safemode-tests" -framework Foundation
 sign "$out/safemode-tests" tests/ios.entitlements
 

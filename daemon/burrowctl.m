@@ -88,13 +88,13 @@ static NSArray<NSDictionary *> *safe_mode_events(BurrowServicePaths *paths) {
 }
 
 static int status(BurrowServicePaths *paths) {
-    NSString *loader = BurrowOwnerOfFile(BurrowSystemLoaderPath);
-    NSString *engine = BurrowOwnerOfFile(BurrowSystemEnginePath);
+    NSString *loader = BurrowOwnerOfFile(BurrowSystemLoaderPath());
+    NSString *engine = BurrowOwnerOfFile(BurrowSystemEnginePath());
     print([NSString stringWithFormat:@"Tweak loader:    %@", loader]);
     print([NSString stringWithFormat:@"Hooking engine:  %@", engine]);
     pid_t pid = BurrowDaemonPID();
     print(pid ? [NSString stringWithFormat:@"burrowd:         running (pid %d)", pid] : @"burrowd:         not running");
-    NSData *data = [NSData dataWithContentsOfFile:BurrowDaemonStatisticsPath];
+    NSData *data = [NSData dataWithContentsOfFile:BurrowDaemonStatisticsPath()];
     NSDictionary *statistics = data ? [NSPropertyListSerialization propertyListWithData:data options:0 format:NULL error:NULL]
                                     : nil;
     if ([statistics isKindOfClass:[NSDictionary class]]) {
@@ -131,8 +131,8 @@ static int status(BurrowServicePaths *paths) {
     } else {
         print(@"Safe Mode:       off until Burrow's loader loads the tweaks");
     }
-    NSDictionary *trial = [NSDictionary dictionaryWithContentsOfFile:BurrowTrialPath];
-    NSDictionary *went_back = [NSDictionary dictionaryWithContentsOfFile:BurrowGuardPath];
+    NSDictionary *trial = [NSDictionary dictionaryWithContentsOfFile:BurrowTrialPath()];
+    NSDictionary *went_back = [NSDictionary dictionaryWithContentsOfFile:BurrowGuardPath()];
     if (since && [trial[@"Until"] isKindOfClass:[NSDate class]] && [trial[@"Until"] timeIntervalSinceNow] > 0) {
         print([NSString stringWithFormat:@"Guard:           watching SpringBoard closely until %@",
                                          format_date(trial[@"Until"])]);
@@ -143,8 +143,8 @@ static int status(BurrowServicePaths *paths) {
                                          went_back[@"Reason"]]);
     }
     NSDate *engine_since = BurrowEngineActiveSince();
-    NSDictionary *engine_trial = [NSDictionary dictionaryWithContentsOfFile:BurrowEngineTrialPath];
-    NSDictionary *engine_back = [NSDictionary dictionaryWithContentsOfFile:BurrowEngineGuardPath];
+    NSDictionary *engine_trial = [NSDictionary dictionaryWithContentsOfFile:BurrowEngineTrialPath()];
+    NSDictionary *engine_back = [NSDictionary dictionaryWithContentsOfFile:BurrowEngineGuardPath()];
     if (engine_since && [engine_trial[@"Until"] isKindOfClass:[NSDate class]] &&
         [engine_trial[@"Until"] timeIntervalSinceNow] > 0) {
         print([NSString stringWithFormat:@"Engine guard:    watching closely until %@", format_date(engine_trial[@"Until"])]);
@@ -235,7 +235,7 @@ static int loaded(NSString *name, NSString *tweakDirectory) {
         // not mapped; a process that started after the switch got it.
         NSDate *since = BurrowLoaderActiveSince();
         NSDate *started = BurrowProcessStartDate(pid.intValue);
-        if ([loader isEqualToString:@"none"] && [BurrowOwnerOfFile(BurrowSystemLoaderPath) isEqualToString:@"Burrow"] &&
+        if ([loader isEqualToString:@"none"] && [BurrowOwnerOfFile(BurrowSystemLoaderPath()) isEqualToString:@"Burrow"] &&
             since && started && [started compare:since] != NSOrderedAscending) {
             loader = @"Burrow (it loaded the tweaks, then the jailbreak closed it)";
         }
@@ -244,9 +244,9 @@ static int loaded(NSString *name, NSString *tweakDirectory) {
                                            @[ @"/libellekit.dylib" ]);
         // A file replaced while mapped, as by reinstalling its package, keeps
         // its old contents in the process but has no path left to show.
-        NSDate *installed = [[NSFileManager defaultManager] attributesOfItemAtPath:BurrowEnginePath
+        NSDate *installed = [[NSFileManager defaultManager] attributesOfItemAtPath:BurrowEnginePath()
                                                                              error:NULL][NSFileModificationDate];
-        if ([engine isEqualToString:@"none"] && [BurrowOwnerOfFile(BurrowSystemEnginePath) isEqualToString:@"Burrow"] &&
+        if ([engine isEqualToString:@"none"] && [BurrowOwnerOfFile(BurrowSystemEnginePath()) isEqualToString:@"Burrow"] &&
             started && installed && [started compare:installed] == NSOrderedAscending) {
             engine = [NSString stringWithFormat:@"not seen: Burrow's engine was reinstalled at %@, after the process "
                                                 @"started, and a replaced file shows no path; restart the process",
@@ -255,18 +255,15 @@ static int loaded(NSString *name, NSString *tweakDirectory) {
         print([NSString stringWithFormat:@"  engine: %@", engine]);
         print([NSString stringWithFormat:@"  tweaks (%lu): %@", (unsigned long)tweaks.count,
                                          tweaks.count ? [tweaks componentsJoinedByString:@", "] : @"none"]);
-        // The jailbreak's other files in the process, under /var/jb.
-        NSString *root = [@"/var/jb" stringByResolvingSymlinksInPath];
+        // The jailbreak's other files in the process, in the jailbreak root.
         NSMutableArray<NSString *> *others = [NSMutableArray array];
         for (NSString *file in files) {
             if ([file containsString:@"/TweakInject/"] || links[file]) {
                 continue;
             }
-            for (NSString *prefix in @[ [root stringByAppendingString:@"/"], @"/var/jb/" ]) {
-                if ([file hasPrefix:prefix]) {
-                    [others addObject:[@"/var/jb/" stringByAppendingString:[file substringFromIndex:prefix.length]]];
-                    break;
-                }
+            NSString *shown = BurrowDisplayPath(file);
+            if (shown) {
+                [others addObject:shown];
             }
         }
         print([NSString stringWithFormat:@"  other jailbreak files (%lu): %@", (unsigned long)others.count,
@@ -380,7 +377,6 @@ static int why(BurrowServicePaths *paths, NSString *what) {
     return 0;
 }
 
-static NSString *const OldABIShim = @"/var/jb/usr/lib/ellekit/OldABI.dylib";
 
 static int check(BurrowServicePaths *paths) {
     NSFileManager *files = [NSFileManager defaultManager];
@@ -440,7 +436,7 @@ static int check(BurrowServicePaths *paths) {
             [managers addObject:tweak];
         }
     }
-    BOOL shim = [files fileExistsAtPath:OldABIShim];
+    BOOL shim = [files fileExistsAtPath:BurrowJailbreakPath(@"/usr/lib/ellekit/OldABI.dylib")];
     print([NSString stringWithFormat:@"Tweaks:          %lu in %@", (unsigned long)count, directory]);
     print([NSString stringWithFormat:@"Old arm64e ABI:  %@", old.count ? [old componentsJoinedByString:@", "] : @"none"]);
     NSMutableArray<NSString *> *libraryLines = [NSMutableArray array];
@@ -460,7 +456,7 @@ static int check(BurrowServicePaths *paths) {
     print([NSString stringWithFormat:@"Engine imports:  %lu symbols, used by %lu tweaks", (unsigned long)engineSymbols.count,
                                      (unsigned long)engineUsers.count]);
     // Whether Burrow's hooking engine has every one of them.
-    void *engine = dlopen(BurrowEnginePath.fileSystemRepresentation, RTLD_LAZY | RTLD_LOCAL);
+    void *engine = dlopen(BurrowEnginePath().fileSystemRepresentation, RTLD_LAZY | RTLD_LOCAL);
     NSMutableArray<NSString *> *lacking = [NSMutableArray array];
     for (NSString *symbol in [engineSymbols.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
         if (engine && !dlsym(engine, symbol.UTF8String)) {
@@ -504,10 +500,10 @@ static int loader(NSString *which) {
             return 1;
         }
         NSDate *until = [NSDate dateWithTimeIntervalSinceNow:BurrowTrialLength];
-        [[NSFileManager defaultManager] removeItemAtPath:BurrowGuardPath error:NULL];
-        if (![@{ @"Until" : until } writeToFile:BurrowTrialPath atomically:YES] ||
+        [[NSFileManager defaultManager] removeItemAtPath:BurrowGuardPath() error:NULL];
+        if (![@{ @"Until" : until } writeToFile:BurrowTrialPath() atomically:YES] ||
             ![system_switch useBurrowLoader:&error]) {
-            [[NSFileManager defaultManager] removeItemAtPath:BurrowTrialPath error:NULL];
+            [[NSFileManager defaultManager] removeItemAtPath:BurrowTrialPath() error:NULL];
             print([NSString stringWithFormat:@"The tweak loader did not change: %@",
                                              error.localizedDescription ?: @"the guard cannot be set up"]);
             return 1;
@@ -524,7 +520,7 @@ static int loader(NSString *which) {
             print([NSString stringWithFormat:@"The tweak loader did not change: %@", error.localizedDescription]);
             return 1;
         }
-        [[NSFileManager defaultManager] removeItemAtPath:BurrowTrialPath error:NULL];
+        [[NSFileManager defaultManager] removeItemAtPath:BurrowTrialPath() error:NULL];
         print(@"ElleKit's loader loads tweaks into new processes again. Respring to load SpringBoard with it.");
         return 0;
     }
@@ -618,7 +614,7 @@ static int tweaks_report(BurrowServicePaths *paths) {
     NSArray *disabled = [settings[@"DisabledTweaks"] isKindOfClass:[NSArray class]] ? settings[@"DisabledTweaks"] : @[];
     NSDictionary *perProcess =
         [settings[@"DisabledInProcesses"] isKindOfClass:[NSDictionary class]] ? settings[@"DisabledInProcesses"] : @{};
-    BurrowPackageIndex *packages = [[BurrowPackageIndex alloc] initWithDpkgDirectory:paths.dpkgDirectory];
+    BurrowPackageIndex *packages = [[BurrowPackageIndex alloc] initWithDpkgDirectory:paths.dpkgDirectory listRoot:paths.dpkgListRoot];
     NSArray<NSString *> *engineNames =
         @[ @"CydiaSubstrate", @"libsubstrate.dylib", @"libhooker.dylib", @"libblackjack.dylib", @"libellekit.dylib" ];
 
@@ -723,10 +719,10 @@ static int engine(NSString *which) {
             return 1;
         }
         NSDate *until = [NSDate dateWithTimeIntervalSinceNow:BurrowTrialLength];
-        [[NSFileManager defaultManager] removeItemAtPath:BurrowEngineGuardPath error:NULL];
-        if (![@{ @"Until" : until } writeToFile:BurrowEngineTrialPath atomically:YES] ||
+        [[NSFileManager defaultManager] removeItemAtPath:BurrowEngineGuardPath() error:NULL];
+        if (![@{ @"Until" : until } writeToFile:BurrowEngineTrialPath() atomically:YES] ||
             ![system_switch useBurrowEngine:&error]) {
-            [[NSFileManager defaultManager] removeItemAtPath:BurrowEngineTrialPath error:NULL];
+            [[NSFileManager defaultManager] removeItemAtPath:BurrowEngineTrialPath() error:NULL];
             print([NSString stringWithFormat:@"The hooking engine did not change: %@",
                                              error.localizedDescription ?: @"the trial cannot be recorded"]);
             return 1;
@@ -744,7 +740,7 @@ static int engine(NSString *which) {
             print([NSString stringWithFormat:@"The hooking engine did not change: %@", error.localizedDescription]);
             return 1;
         }
-        [[NSFileManager defaultManager] removeItemAtPath:BurrowEngineTrialPath error:NULL];
+        [[NSFileManager defaultManager] removeItemAtPath:BurrowEngineTrialPath() error:NULL];
         print(@"ElleKit's engine hooks for the tweaks in new processes again. Respring to load SpringBoard with it.");
         return 0;
     }
@@ -897,18 +893,18 @@ static NSArray<NSString *> *json_strings(id list) {
 static int json_report(BurrowServicePaths *paths) {
     NSMutableDictionary *report = [NSMutableDictionary dictionary];
     report[@"format"] = @1;
-    report[@"loader"] = BurrowOwnerOfFile(BurrowSystemLoaderPath);
-    report[@"engine"] = BurrowOwnerOfFile(BurrowSystemEnginePath);
+    report[@"loader"] = BurrowOwnerOfFile(BurrowSystemLoaderPath());
+    report[@"engine"] = BurrowOwnerOfFile(BurrowSystemEnginePath());
     // A comparison is an int in C, which JSON would print as 1 or 0.
     report[@"daemonRunning"] = BurrowDaemonPID() != 0 ? @YES : @NO;
     NSDate *since = BurrowLoaderActiveSince();
     report[@"safeModeSince"] = json_date(since);
-    NSDictionary *trial = [NSDictionary dictionaryWithContentsOfFile:BurrowTrialPath];
+    NSDictionary *trial = [NSDictionary dictionaryWithContentsOfFile:BurrowTrialPath()];
     NSDate *until = trial[@"Until"];
     report[@"trialUntil"] = since && [until isKindOfClass:[NSDate class]] && until.timeIntervalSinceNow > 0
                                 ? json_date(until)
                                 : [NSNull null];
-    NSDictionary *went_back = since ? nil : [NSDictionary dictionaryWithContentsOfFile:BurrowGuardPath];
+    NSDictionary *went_back = since ? nil : [NSDictionary dictionaryWithContentsOfFile:BurrowGuardPath()];
     report[@"wentBack"] = went_back ? @{
         @"date" : json_date(went_back[@"Date"]),
         @"reason" : [went_back[@"Reason"] isKindOfClass:[NSString class]] ? went_back[@"Reason"] : @"",
@@ -936,7 +932,7 @@ static int json_report(BurrowServicePaths *paths) {
     NSFileManager *files = [NSFileManager defaultManager];
     NSString *directory = paths.tweakDirectories.firstObject;
     report[@"tweakDirectory"] = directory;
-    BurrowPackageIndex *packages = [[BurrowPackageIndex alloc] initWithDpkgDirectory:paths.dpkgDirectory];
+    BurrowPackageIndex *packages = [[BurrowPackageIndex alloc] initWithDpkgDirectory:paths.dpkgDirectory listRoot:paths.dpkgListRoot];
     NSMutableArray *tweaks = [NSMutableArray array];
     for (NSString *file in [[files contentsOfDirectoryAtPath:directory error:NULL]
              sortedArrayUsingSelector:@selector(caseInsensitiveCompare:)]) {
@@ -1010,7 +1006,11 @@ static int events(BurrowServicePaths *paths) {
 
 int main(int argc, char **argv) {
     @autoreleasepool {
-        BurrowServicePaths *paths = [BurrowServicePaths rootlessPaths];
+        if (!BurrowJailbreakRoot()) {
+            fprintf(stderr, "burrowctl: cannot find the jailbreak root. Run the burrowctl inside it.\n");
+            return 1;
+        }
+        BurrowServicePaths *paths = [BurrowServicePaths systemPaths];
         NSString *command = argc > 1 ? @(argv[1]) : @"status";
         if ([command isEqualToString:@"status"] && argc <= 2) {
             return status(paths);
