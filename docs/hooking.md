@@ -233,3 +233,4 @@ Device results so far:
 | iPhone 14 Pro Max | A16 (arm64 and arm64e tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.31 | All suites passed for both architectures, including the loader tests |
 | iPhone 14 Pro Max | A16 (arm64 and arm64e tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.39 | All suites passed for both architectures, including the Safe Mode tests |
 | iPhone 14 Pro Max | A16 (arm64 and arm64e tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.42 | All suites passed for both architectures, including the crash log tests |
+| iPhone 14 Pro Max | A16 (arm64 and arm64e tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.107 | All suites passed for both architectures; the Substrate suite's 58 checks include finding and using Burrow's own functions with `dlsym`, as [api.md](api.md) says |
