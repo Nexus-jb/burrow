@@ -5,12 +5,16 @@
 // tweak's CydiaSubstrate.framework is Burrow. This program does not link
 // Burrow itself: it loads the tweak, checks that the tweak's Substrate is
 // Burrow, checks the tweak's hooks, and then calls the remaining Substrate
-// and libhooker functions through the library the tweak loaded.
+// and libhooker functions through the library the tweak loaded. Last, it
+// finds Burrow's own functions the way docs/api.md tells tweaks to, with
+// dlsym, and uses them.
 //
 //   substrate-tests <BurrowSampleTweak.dylib>
 
 #include "compat.h"
 #include "pac.h"
+
+#include <burrow/objc.h>
 
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
@@ -63,6 +67,19 @@ __attribute__((noinline)) int burrow_lh_patch_target(int x) {
     return x + add;
 }
 
+int burrow_api_target(int x);
+int burrow_api_batch_target(int x);
+
+__attribute__((noinline)) int burrow_api_target(int x) {
+    volatile int scale = 11;
+    return x * scale;
+}
+
+__attribute__((noinline)) int burrow_api_batch_target(int x) {
+    volatile int add = 12;
+    return x + add;
+}
+
 // Not exported: only the symbol table lists it.
 __attribute__((noinline, used)) static int burrow_local_function(int x) {
     volatile int add = 9;
@@ -93,6 +110,22 @@ static IMP lb_unused;
 
 static int lb_replacement(id self, SEL cmd) {
     return ((int (*)(id, SEL))lb_original)(self, cmd) + 10000;
+}
+
+static int (*api_original)(int);
+static int (*api_batch_original)(int);
+static IMP api_message_original;
+
+static int api_replacement(int x) {
+    return api_original(x) + 1000;
+}
+
+static int api_batch_replacement(int x) {
+    return api_batch_original(x) + 2000;
+}
+
+static int api_message_replacement(id self, SEL cmd) {
+    return ((int (*)(id, SEL))api_message_original)(self, cmd) + 100000;
 }
 
 static uintptr_t code(const void *pointer) {
@@ -229,6 +262,47 @@ int main(int argc, char **argv) {
     CHECK(send_int(child_object, value) == 11107);
     CHECK(LBHookMessage_fn(base, sel_registerName("burrowMissing"), (void *)lb_replacement, &lb_unused) ==
           LIBHOOKER_ERR_SELECTOR_NOT_FOUND);
+
+    current = "Burrow's API, found as docs/api.md says";
+    // A tweak looks Burrow's functions up when it loads, so that it still
+    // loads where another engine is in place.
+    __typeof__(&burrow_hook_function) api_hook =
+        (__typeof__(&burrow_hook_function))dlsym(RTLD_DEFAULT, "burrow_hook_function");
+    __typeof__(&burrow_hook_functions) api_hooks =
+        (__typeof__(&burrow_hook_functions))dlsym(RTLD_DEFAULT, "burrow_hook_functions");
+    __typeof__(&burrow_status_string) api_string =
+        (__typeof__(&burrow_status_string))dlsym(RTLD_DEFAULT, "burrow_status_string");
+    __typeof__(&burrow_hook_message) api_message =
+        (__typeof__(&burrow_hook_message))dlsym(RTLD_DEFAULT, "burrow_hook_message");
+    CHECK(api_hook && api_hooks && api_string && api_message);
+    Dl_info api_info;
+    CHECK(api_hook && dladdr((const void *)code((const void *)api_hook), &api_info) && api_info.dli_fname &&
+          strstr(api_info.dli_fname, "/frameworks/CydiaSubstrate.framework/"));
+    if (api_hook && api_hooks && api_string && api_message) {
+        CHECK(burrow_api_target(2) == 22);
+        CHECK(api_hook((void *)burrow_api_target, (void *)api_replacement, (void **)&api_original) == BURROW_OK);
+        CHECK(burrow_api_target(2) == 1022);
+
+        // A batch with a bad entry changes nothing and names that entry.
+        burrow_function_hook batch[2] = {
+            { (void *)burrow_api_batch_target, (void *)api_batch_replacement, (void **)&api_batch_original },
+            { NULL, (void *)api_batch_replacement, NULL },
+        };
+        size_t failed = 99;
+        CHECK(api_hooks(batch, 2, &failed) == BURROW_ERR_INVALID_ARGUMENT);
+        CHECK(failed == 1);
+        CHECK(burrow_api_batch_target(1) == 13);
+        CHECK(api_hooks(batch, 1, &failed) == BURROW_OK);
+        CHECK(burrow_api_batch_target(1) == 2013);
+        const char *text = api_string(BURROW_ERR_NOT_FOUND);
+        CHECK(text && *text);
+
+        CHECK(api_message(base, value, (IMP)api_message_replacement, &api_message_original) == BURROW_OK);
+        CHECK(send_int(base_object, value) == 110107);
+        CHECK(send_int(child_object, value) == 111107);
+        CHECK(api_message(base, sel_registerName("burrowMissing"), (IMP)api_message_replacement, NULL) ==
+              BURROW_ERR_NOT_FOUND);
+    }
 
     if (failures) {
         fprintf(stderr, "[substrate] %d of %d checks failed\n", failures, checks);

@@ -212,8 +212,10 @@ needs the main executable's image must not assume index 0.
   Burrow's `CydiaSubstrate.framework` and checks its function hook, its
   Objective-C hooks on defined, inherited and class methods, and its use of
   `MSGetImageByName` and `MSFindSymbol`. It then calls every Substrate and
-  libhooker function above directly. The test program does not link Burrow,
-  so it sees only what a tweak would see. It runs on iOS.
+  libhooker function above directly, and finds Burrow's own functions with
+  `dlsym`, as [api.md](api.md) tells tweaks to, and uses them. The test
+  program does not link Burrow, so it sees only what a tweak would see. It
+  runs on iOS.
 
 These suites also run on jailbroken iPhones. CI builds them into a rootless
 package, `com.nexusjb.burrow-tests` (or run `make ios-tests-package` with
