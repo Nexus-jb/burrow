@@ -495,6 +495,30 @@ static void test_crash_json(NSString *fixtures, NSString *dpkg, NSString *scratc
     NSDictionary *cut = BurrowCrashJSONEntry(segv, deep);
     CHECK([cut[@"frames"] count] == BurrowCrashJSONFrameLimit);
 
+    // Clearing forgets every entry and deletes the copies, and only those.
+    NSString *crash_dir = [scratch stringByAppendingPathComponent:@"crash-json"];
+    NSString *kept_copy = [log pathOfReportInEntry:segv];
+    CHECK([[NSFileManager defaultManager] fileExistsAtPath:kept_copy]);
+    NSString *neighbour = [crash_dir stringByAppendingPathComponent:@"other.plist"];
+    [[@"keep" dataUsingEncoding:NSUTF8StringEncoding] writeToFile:neighbour atomically:YES];
+    NSUInteger cleared = 0;
+    NSError *clear_error = nil;
+    CHECK([log clearEntries:&cleared error:&clear_error]);
+    CHECK(cleared == 3);
+    CHECK(log.entries.count == 0);
+    CHECK(![[NSFileManager defaultManager] fileExistsAtPath:kept_copy]);
+    CHECK([[NSFileManager defaultManager] fileExistsAtPath:neighbour]);
+    CHECK(BurrowCrashJSONEntries(log, 10).count == 0);
+    CHECK([log clearEntries:&cleared error:&clear_error] && cleared == 0);
+    // A crash after the clear is logged as before.
+    CHECK(record(log, fixtures, @"segv.ips") != nil);
+    CHECK(log.entries.count == 1);
+    // A log that was never written clears to nothing.
+    BurrowCrashLog *empty = [[BurrowCrashLog alloc] initWithDirectory:[scratch stringByAppendingPathComponent:@"no-log"]
+                                                             analyzer:analyzer
+                                                             packages:nil];
+    CHECK([empty clearEntries:&cleared error:NULL] && cleared == 0);
+
     // Without the copy of its report, an entry still gives what the log
     // knows.
     NSDictionary *bare = BurrowCrashJSONEntry(segv, nil);

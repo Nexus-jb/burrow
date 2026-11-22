@@ -5,6 +5,9 @@
 //   burrowctl status          the tweak loader and hooking engine in use,
 //                             burrowd, the crash log, Safe Mode and the guard
 //   burrowctl crashes [N]     the N newest crashes with tweaks loaded (10)
+//   burrowctl clear-crashes   forget the crash log and delete its copies of
+//                             the crash reports (root only); Safe Mode's
+//                             settings and events stay
 //   burrowctl events          what Safe Mode turned off, and why
 //   burrowctl loaded NAME     the tweak loader, hooking engine and tweaks in
 //                             the running processes called NAME (as root)
@@ -791,6 +794,24 @@ static NSString *describe_places(NSArray<NSString *> *processes) {
     return in ?: @"nowhere";
 }
 
+static int clear_crashes(BurrowServicePaths *paths) {
+    if (geteuid() != 0) {
+        print(@"Clearing the crash log needs root.");
+        return 1;
+    }
+    BurrowCrashAnalyzer *analyzer = [[BurrowCrashAnalyzer alloc] initWithTweakDirectories:@[] jailbreakRoots:@[]];
+    BurrowCrashLog *log = [[BurrowCrashLog alloc] initWithDirectory:paths.crashLogDirectory analyzer:analyzer packages:nil];
+    NSUInteger count = 0;
+    NSError *error = nil;
+    if (![log clearEntries:&count error:&error]) {
+        print([NSString stringWithFormat:@"The crash log was not cleared: %@", error.localizedDescription]);
+        return 1;
+    }
+    print(count == 1 ? @"Cleared 1 crash from the crash log."
+                     : [NSString stringWithFormat:@"Cleared %lu crashes from the crash log.", (unsigned long)count]);
+    return 0;
+}
+
 static int enable(BurrowServicePaths *paths, NSString *tweak, NSString *process) {
     if (geteuid() != 0) {
         print(@"Turning a tweak back on needs root.");
@@ -998,6 +1019,9 @@ int main(int argc, char **argv) {
             NSInteger count = argc == 3 ? @(argv[2]).integerValue : 10;
             return crashes(paths, count > 0 ? (NSUInteger)count : 10);
         }
+        if ([command isEqualToString:@"clear-crashes"] && argc == 2) {
+            return clear_crashes(paths);
+        }
         if ([command isEqualToString:@"events"] && argc <= 2) {
             return events(paths);
         }
@@ -1034,7 +1058,7 @@ int main(int argc, char **argv) {
                 return result;
             }
         }
-        fprintf(stderr, "usage: burrowctl status | crashes [count] | events | enable TWEAK [PROCESS] | "
+        fprintf(stderr, "usage: burrowctl status | crashes [count] | clear-crashes | events | enable TWEAK [PROCESS] | "
                         "disable TWEAK [PROCESS] | json | check | "
                         "why NAME|FILE | loaded NAME | tweaks | loader burrow|ellekit | engine burrow|ellekit\n");
         return 2;

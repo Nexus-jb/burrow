@@ -150,7 +150,8 @@ com.apple.springboard: Foo (com.example.foo 1.2): EXC_BAD_ACCESS (SIGSEGV) in Fo
 com.example.app: no single tweak to blame (loaded: Bar, Foo): EXC_BAD_ACCESS (SIGSEGV) in Example (-[ExampleModel load] + 0)
 ```
 
-The log keeps the 50 newest entries and deletes the copies of older ones.
+The log keeps the 50 newest entries and deletes the copies of older ones,
+and `burrowctl clear-crashes` empties it when the person asks.
 Each crash is recorded once. Nothing leaves the device by itself.
 `burrowctl json` gives the ten newest crashes with a tweak to blame to the
 package manager, with the exception and the crashed thread's frames, each
@@ -176,6 +177,11 @@ ones.
 burrowctl status       the tweak loader and hooking engine in use, burrowd,
                        the reports it has read, the crash log and Safe Mode
 burrowctl crashes [N]  the N newest crashes with tweaks loaded (10)
+burrowctl clear-crashes
+                       forget the crash log and delete its copies of the
+                       crash reports (root only). Safe Mode's settings and
+                       events stay, and burrowd does not log the same
+                       crashes again
 burrowctl events       what Safe Mode turned off, and why
 burrowctl enable TWEAK [PROCESS]
                        turn a tweak back on, in PROCESS or everywhere

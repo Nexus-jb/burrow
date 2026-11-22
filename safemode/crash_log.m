@@ -81,6 +81,44 @@ static NSError *crash_log_error(NSString *description) {
     return [self readEntries];
 }
 
+- (BOOL)clearEntries:(NSUInteger *)count error:(NSError **)error {
+    if (count) {
+        *count = 0;
+    }
+    NSFileManager *files = [NSFileManager defaultManager];
+    if (![files fileExistsAtPath:_directory]) {
+        return YES;
+    }
+    NSString *lock_path = [_directory stringByAppendingPathComponent:@"crashes.lock"];
+    int lock = open(lock_path.fileSystemRepresentation, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+    if (lock < 0 || flock(lock, LOCK_EX) != 0) {
+        if (lock >= 0) {
+            close(lock);
+        }
+        if (error) {
+            *error = crash_log_error([NSString stringWithFormat:@"cannot lock %@", lock_path]);
+        }
+        return NO;
+    }
+    NSUInteger cleared = [self readEntries].count;
+    NSData *log = [NSPropertyListSerialization dataWithPropertyList:@{ @"Entries" : @[] }
+                                                             format:NSPropertyListXMLFormat_v1_0
+                                                            options:0
+                                                              error:error];
+    BOOL written = log && [log writeToFile:self.logPath options:NSDataWritingAtomic error:error];
+    if (written) {
+        // Only the copies the log kept: nothing else lives in reports.
+        for (NSString *name in [files contentsOfDirectoryAtPath:self.reportsDirectory error:NULL]) {
+            [files removeItemAtPath:[self.reportsDirectory stringByAppendingPathComponent:name] error:NULL];
+        }
+    }
+    close(lock);
+    if (written && count) {
+        *count = cleared;
+    }
+    return written;
+}
+
 - (BOOL)recordReport:(BurrowCrashReport *)report
                 data:(NSData *)data
                 name:(NSString *)name
