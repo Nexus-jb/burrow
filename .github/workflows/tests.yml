@@ -107,3 +107,36 @@ jobs:
           name: burrow-${{ github.run_number }}
           path: build/packages/*.deb
           if-no-files-found: error
+
+  publish-dev:
+    name: Publish the development build
+    # A run started by hand also publishes its packages as the dev
+    # prerelease, which can be downloaded without signing in to GitHub.
+    if: github.event_name == 'workflow_dispatch'
+    needs: ios-package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: burrow-${{ github.run_number }}
+          path: dist
+
+      - name: Replace the development prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          REF_NAME: ${{ github.ref_name }}
+          VERSION: 0.0.0~dev.${{ github.run_number }}
+        run: |
+          cd dist
+          sha256sum *.deb > SHA256SUMS
+          cat SHA256SUMS
+          notes="A development build of $REF_NAME ($SHA), for testing on a device. It is not a release.
+
+          com.nexusjb.burrow is Burrow; com.nexusjb.burrow-tests holds the tests that run on a jailbroken iPhone."
+          gh release delete dev --repo "$REPO" --yes --cleanup-tag || true
+          gh release create dev --repo "$REPO" --prerelease --latest=false --target "$SHA" \
+            --title "Development build $VERSION" --notes "$notes" ./*.deb SHA256SUMS

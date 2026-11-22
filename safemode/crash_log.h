@@ -47,6 +47,12 @@ extern NSString *const BurrowCrashLogIncident;
 // Every entry, oldest first.
 - (NSArray<NSDictionary *> *)entries;
 
+// Forgets every entry and deletes the copies of their crash reports, when
+// the person asks to clear the log. Safe Mode's settings and events and
+// burrowd's record of the reports it has read stay, so the same crashes are
+// not logged again. Sets *count to how many entries went.
+- (BOOL)clearEntries:(NSUInteger *_Nullable)count error:(NSError **)error;
+
 // Where the copy of an entry's crash report is.
 - (NSString *)pathOfReportInEntry:(NSDictionary *)entry;
 

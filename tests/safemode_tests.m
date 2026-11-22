@@ -11,6 +11,7 @@
 
 #import <Foundation/Foundation.h>
 
+#import "crash_json.h"
 #import "crash_log.h"
 #import "crash_report.h"
 #import "packages.h"
@@ -412,6 +413,118 @@ static void test_crash_log(NSString *fixtures, NSString *dpkg, NSString *scratch
     CHECK(log.entries.count == 2);
     CHECK([log.entries.firstObject[BurrowCrashLogProcess] isEqualToString:@"Example"]);
     CHECK(![[NSFileManager defaultManager] fileExistsAtPath:first_copy]);
+}
+
+// The crash log as burrowctl json gives it: crashes with a tweak to blame,
+// newest first, with the exception, the frames by file name, and nothing
+// that names a path.
+static void test_crash_json(NSString *fixtures, NSString *dpkg, NSString *scratch) {
+    BurrowCrashAnalyzer *analyzer = [[BurrowCrashAnalyzer alloc]
+        initWithTweakDirectories:@[ @"/var/jb/usr/lib/TweakInject", [RealRoot stringByAppendingString:@"/usr/lib/TweakInject"] ]
+                  jailbreakRoots:@[ @"/var/jb", RealRoot ]];
+    BurrowPackageIndex *packages = [[BurrowPackageIndex alloc] initWithDpkgDirectory:dpkg];
+    BurrowCrashLog *log = [[BurrowCrashLog alloc] initWithDirectory:[scratch stringByAppendingPathComponent:@"crash-json"]
+                                                           analyzer:analyzer
+                                                           packages:packages];
+    CHECK(BurrowCrashJSONEntries(log, 10).count == 0);
+    NSDictionary *segv = record(log, fixtures, @"segv.ips");
+    CHECK(record(log, fixtures, @"app-fault.ips") != nil);
+    NSDictionary *thrown = record(log, fixtures, @"exception.ips");
+
+    NSArray<NSDictionary *> *crashes = BurrowCrashJSONEntries(log, 10);
+    CHECK([NSJSONSerialization isValidJSONObject:crashes]);
+    // The crash with no tweak to blame is left out; the newest comes first.
+    CHECK(crashes.count == (thrown[BurrowCrashLogTweak] ? 2u : 1u));
+    NSDictionary *first = crashes.lastObject;
+    CHECK([first[@"tweak"] isEqualToString:@"Foo"]);
+    CHECK([first[@"process"] isEqualToString:segv[BurrowCrashLogProcess]]);
+    CHECK([first[@"bundleIdentifier"] isEqualToString:@"com.apple.springboard"]);
+    CHECK([first[@"incident"] isEqualToString:segv[BurrowCrashLogIncident]]);
+    CHECK([first[@"tweaks"] isEqual:(@[ @"Bar", @"Foo" ])]);
+    CHECK([first[@"packages"][@"Foo"] isEqual:(@{ @"package" : @"com.example.foo", @"name" : @"Foo", @"version" : @"1.2" })]);
+    CHECK([first[@"system"] isEqualToString:@"iPhone OS 16.3.1 (20D67)"]);
+    CHECK([first[@"device"] isEqualToString:@"iPhone15,3"]);
+    CHECK([first[@"reason"] isEqualToString:segv[BurrowCrashLogReason]]);
+    CHECK([first[@"date"] isKindOfClass:[NSString class]]);
+    CHECK([first[@"exception"][@"type"] isEqualToString:@"EXC_BAD_ACCESS"]);
+    CHECK([first[@"exception"][@"signal"] isEqualToString:@"SIGSEGV"]);
+    CHECK([first[@"exception"][@"subtype"] hasPrefix:@"KERN_INVALID_ADDRESS"]);
+    CHECK(first[@"exception"][@"name"] == [NSNull null]);
+    NSArray<NSDictionary *> *frames = first[@"frames"];
+    CHECK(frames.count == 3);
+    CHECK([frames.firstObject[@"image"] isEqualToString:@"Foo.dylib"]);
+    CHECK([frames.firstObject[@"symbol"] isEqualToString:@"-[FooView layoutSubviews]"]);
+    CHECK([frames.firstObject[@"symbolOffset"] isEqual:@16]);
+    CHECK([frames.firstObject[@"offset"] isEqual:@16256]);
+    for (NSDictionary *frame in frames) {
+        CHECK(frame[@"image"] == [NSNull null] || ![frame[@"image"] containsString:@"/"]);
+    }
+    NSData *encoded = [NSJSONSerialization dataWithJSONObject:crashes options:0 error:NULL];
+    NSString *text = [[NSString alloc] initWithData:encoded encoding:NSUTF8StringEncoding];
+    CHECK(text && ![text containsString:@"preboot"] && ![text containsString:@"TweakInject"]);
+    CHECK(BurrowCrashJSONEntries(log, 1).count == 1);
+    CHECK(BurrowCrashJSONEntries(log, 0).count == 0);
+
+    // An uncaught exception gives where it was thrown, and its name and
+    // message, cut to the limit.
+    if (thrown[BurrowCrashLogTweak]) {
+        NSDictionary *latest = crashes.firstObject;
+        CHECK([latest[@"exception"][@"type"] isEqualToString:@"EXC_CRASH"]);
+        CHECK([latest[@"frames"] count] == 7);
+    }
+
+    // Many frames are cut to the limit, and a long message too.
+    NSData *data = [NSData dataWithContentsOfFile:[fixtures stringByAppendingPathComponent:@"segv.ips"]];
+    NSString *whole = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    NSRange newline = [whole rangeOfString:@"\n"];
+    NSMutableDictionary *body = [NSJSONSerialization
+        JSONObjectWithData:[[whole substringFromIndex:NSMaxRange(newline)] dataUsingEncoding:NSUTF8StringEncoding]
+                   options:NSJSONReadingMutableContainers
+                     error:NULL];
+    NSMutableDictionary *thread = body[@"threads"][[body[@"faultingThread"] unsignedIntegerValue]];
+    NSMutableArray *many = [NSMutableArray array];
+    for (NSUInteger i = 0; i < 60; i++) {
+        [many addObject:[thread[@"frames"] firstObject]];
+    }
+    thread[@"frames"] = many;
+    NSData *rebuilt = [NSJSONSerialization dataWithJSONObject:body options:0 error:NULL];
+    NSMutableData *ips = [[[whole substringToIndex:NSMaxRange(newline)] dataUsingEncoding:NSUTF8StringEncoding] mutableCopy];
+    [ips appendData:rebuilt];
+    BurrowCrashReport *deep = [BurrowCrashReport reportWithData:ips error:NULL];
+    CHECK(deep != nil);
+    NSDictionary *cut = BurrowCrashJSONEntry(segv, deep);
+    CHECK([cut[@"frames"] count] == BurrowCrashJSONFrameLimit);
+
+    // Clearing forgets every entry and deletes the copies, and only those.
+    NSString *crash_dir = [scratch stringByAppendingPathComponent:@"crash-json"];
+    NSString *kept_copy = [log pathOfReportInEntry:segv];
+    CHECK([[NSFileManager defaultManager] fileExistsAtPath:kept_copy]);
+    NSString *neighbour = [crash_dir stringByAppendingPathComponent:@"other.plist"];
+    [[@"keep" dataUsingEncoding:NSUTF8StringEncoding] writeToFile:neighbour atomically:YES];
+    NSUInteger cleared = 0;
+    NSError *clear_error = nil;
+    CHECK([log clearEntries:&cleared error:&clear_error]);
+    CHECK(cleared == 3);
+    CHECK(log.entries.count == 0);
+    CHECK(![[NSFileManager defaultManager] fileExistsAtPath:kept_copy]);
+    CHECK([[NSFileManager defaultManager] fileExistsAtPath:neighbour]);
+    CHECK(BurrowCrashJSONEntries(log, 10).count == 0);
+    CHECK([log clearEntries:&cleared error:&clear_error] && cleared == 0);
+    // A crash after the clear is logged as before.
+    CHECK(record(log, fixtures, @"segv.ips") != nil);
+    CHECK(log.entries.count == 1);
+    // A log that was never written clears to nothing.
+    BurrowCrashLog *empty = [[BurrowCrashLog alloc] initWithDirectory:[scratch stringByAppendingPathComponent:@"no-log"]
+                                                             analyzer:analyzer
+                                                             packages:nil];
+    CHECK([empty clearEntries:&cleared error:NULL] && cleared == 0);
+
+    // Without the copy of its report, an entry still gives what the log
+    // knows.
+    NSDictionary *bare = BurrowCrashJSONEntry(segv, nil);
+    CHECK(bare[@"exception"] == [NSNull null] && [bare[@"frames"] count] == 0);
+    CHECK([bare[@"tweak"] isEqualToString:@"Foo"]);
+    CHECK([NSJSONSerialization isValidJSONObject:BurrowCrashJSONEntry(@{}, nil)]);
 }
 
 // The burrowd service: every report once, Safe Mode only from a date on.
@@ -1063,6 +1176,8 @@ int main(int argc, char **argv) {
         test_package_links(scratch);
         test_crash_log([dir stringByAppendingPathComponent:@"safemode-fixtures"],
                        [dir stringByAppendingPathComponent:@"safemode-dpkg"], scratch);
+        test_crash_json([dir stringByAppendingPathComponent:@"safemode-fixtures"],
+                        [dir stringByAppendingPathComponent:@"safemode-dpkg"], scratch);
         test_service([dir stringByAppendingPathComponent:@"safemode-fixtures"],
                      [dir stringByAppendingPathComponent:@"safemode-dpkg"], scratch);
         test_guard([dir stringByAppendingPathComponent:@"safemode-fixtures"],
