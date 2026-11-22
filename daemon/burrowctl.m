@@ -41,6 +41,7 @@
 
 #import <Foundation/Foundation.h>
 
+#import "crash_json.h"
 #import "crash_log.h"
 #import "inspect.h"
 #import "packages.h"
@@ -955,6 +956,12 @@ static int json_report(BurrowServicePaths *paths) {
         }];
     }
     report[@"events"] = events;
+
+    // The newest crashes with a tweak to blame, for the package manager to
+    // show and, with the person's consent, send to the tweak's developer.
+    BurrowCrashAnalyzer *analyzer = [[BurrowCrashAnalyzer alloc] initWithTweakDirectories:@[] jailbreakRoots:@[]];
+    report[@"crashes"] = BurrowCrashJSONEntries(
+        [[BurrowCrashLog alloc] initWithDirectory:paths.crashLogDirectory analyzer:analyzer packages:nil], 10);
 
     NSError *error = nil;
     NSData *json = [NSJSONSerialization dataWithJSONObject:report options:NSJSONWritingSortedKeys error:&error];
