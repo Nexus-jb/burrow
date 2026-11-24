@@ -102,7 +102,7 @@ jobs:
           otool -l build/ios/BurrowSampleTweak.dylib | grep -A2 LC_RPATH
           nm -gU build/ios/arm64e/frameworks/CydiaSubstrate.framework/CydiaSubstrate
           lipo -info build/ios-universal/*
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: burrow-${{ github.run_number }}
           path: build/packages/*.deb
@@ -118,7 +118,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: burrow-${{ github.run_number }}
           path: dist
