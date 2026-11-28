@@ -1,12 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- SPDX-License-Identifier: Apache-2.0 -->
-<!-- Entitlements of burrowd and burrowctl. iOS 18 keeps the crash reports
-     in /var/mobile/Library/Logs/CrashReporter from processes without this
-     entitlement, root's included (iOS 16 did not). Both programs only read
-     them. -->
+<!-- Entitlements of burrowd and burrowctl. Both read the crash reports in
+     /var/mobile/Library/Logs/CrashReporter, which iOS 18 keeps from
+     programs without the storage entitlement, root's included (iOS 16 did
+     not). On RootHide, a program without the first three runs in a
+     sandbox, as with RootHide's own tools. -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>platform-application</key>
+	<true/>
+	<key>com.apple.private.security.no-container</key>
+	<true/>
+	<key>com.apple.private.security.no-sandbox</key>
+	<true/>
 	<key>com.apple.private.security.storage.DiagnosticReports</key>
 	<true/>
 </dict>

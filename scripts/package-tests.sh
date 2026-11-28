@@ -130,9 +130,8 @@ real() {
 }
 libexec=@JB@/usr/libexec/burrow-tests
 # The jailbreak's tweak loader stays out of the test programs, whichever
-# loader is on: ElleKit's library would otherwise answer for the sample
-# tweak's CydiaSubstrate.framework. The tests load what they test
-# themselves. Dopamine and RootHide skip injection when this is 1.
+# loader is on. The tests load what they test themselves. Dopamine and
+# RootHide skip injection when this is 1.
 export DISABLE_TWEAKS=1
 uname -m
 for arch in arm64 arm64e; do
@@ -146,7 +145,8 @@ for arch in arm64 arm64e; do
     run "$dir/objc-tests"
     # The sample tweak's CydiaSubstrate.framework resolves to Burrow.
     export DYLD_FRAMEWORK_PATH="$on_disk/frameworks"
-    run "$dir/substrate-tests" "$(real "$libexec/BurrowSampleTweak.dylib")"
+    run "$dir/substrate-tests" "$(real "$libexec/BurrowSampleTweak.dylib")" \
+        "$on_disk/frameworks/CydiaSubstrate.framework/CydiaSubstrate"
     unset DYLD_FRAMEWORK_PATH
     run "$dir/loader/loader-tests" "$on_disk/loader"
     # Crashes a test program on purpose and reads the crash reports.
