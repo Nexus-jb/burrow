@@ -141,7 +141,8 @@ for arch in arm64 arm64e; do
     run "$dir/objc-tests"
     # The sample tweak's CydiaSubstrate.framework resolves to Burrow.
     export DYLD_FRAMEWORK_PATH="$on_disk/frameworks"
-    run "$dir/substrate-tests" "$(real "$libexec/BurrowSampleTweak.dylib")"
+    run "$dir/substrate-tests" "$(real "$libexec/BurrowSampleTweak.dylib")" \
+        "$on_disk/frameworks/CydiaSubstrate.framework/CydiaSubstrate"
     unset DYLD_FRAMEWORK_PATH
     run "$dir/loader/loader-tests" "$on_disk/loader"
     # Crashes a test program on purpose and reads the crash reports.

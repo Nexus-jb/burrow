@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Checks that a tweak built with Theos against Cydia Substrate runs
-// unchanged on Burrow. The run script sets DYLD_FRAMEWORK_PATH so that the
-// tweak's CydiaSubstrate.framework is Burrow. This program does not link
-// Burrow itself: it loads the tweak, checks that the tweak's Substrate is
-// Burrow, checks the tweak's hooks, and then calls the remaining Substrate
-// and libhooker functions through the library the tweak loaded. Last, it
-// finds Burrow's own functions the way docs/api.md tells tweaks to, with
-// dlsym, and uses them.
+// unchanged on Burrow. This program does not link Burrow itself: it opens
+// Burrow built as CydiaSubstrate.framework, then loads the tweak, checks
+// that the tweak's Substrate is Burrow, checks the tweak's hooks, and then
+// calls the remaining Substrate and libhooker functions through the library
+// the tweak loaded. Last, it finds Burrow's own functions the way
+// docs/api.md tells tweaks to, with dlsym, and uses them.
 //
-//   substrate-tests <BurrowSampleTweak.dylib>
+//   substrate-tests <BurrowSampleTweak.dylib> [<CydiaSubstrate>]
+//
+// The tweak asks for @rpath/CydiaSubstrate.framework/CydiaSubstrate, and
+// dyld gives it the library already open under that name. The run script
+// also sets DYLD_FRAMEWORK_PATH, but on RootHide on iOS 18 the tweak still
+// got the jailbreak's library through its own search paths.
 
 #include "compat.h"
 #include "pac.h"
@@ -133,8 +137,8 @@ static uintptr_t code(const void *pointer) {
 }
 
 int main(int argc, char **argv) {
-    if (argc != 2) {
-        fprintf(stderr, "usage: %s <tweak.dylib>\n", argv[0]);
+    if (argc != 2 && argc != 3) {
+        fprintf(stderr, "usage: %s <tweak.dylib> [<CydiaSubstrate>]\n", argv[0]);
         return 2;
     }
 
@@ -156,6 +160,10 @@ int main(int argc, char **argv) {
     CHECK(burrow_sample_target(5) == 16);
 
     current = "loading the tweak";
+    if (argc > 2 && !dlopen(argv[2], RTLD_NOW | RTLD_GLOBAL)) {
+        fprintf(stderr, "[substrate] cannot load %s: %s\n", argv[2], dlerror());
+        return 1;
+    }
     void *tweak = dlopen(argv[1], RTLD_NOW);
     if (!tweak) {
         fprintf(stderr, "[substrate] cannot load %s: %s\n", argv[1], dlerror());

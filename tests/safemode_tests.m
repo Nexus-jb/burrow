@@ -33,6 +33,7 @@
 #include <spawn.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -582,8 +583,15 @@ static void test_service(NSString *fixtures, NSString *dpkg, NSString *scratch) 
             ofItemAtPath:[reports stringByAppendingPathComponent:@"malformed.ips"]
                    error:NULL];
 
+    // A directory this process may not read, as the system's crash reports
+    // are to a program in RootHide's sandbox. Root reads it anyway.
+    NSString *closed = [scratch stringByAppendingPathComponent:@"closed-reports"];
+    NSString *missing = [scratch stringByAppendingPathComponent:@"no-such-directory"];
+    [files createDirectoryAtPath:closed withIntermediateDirectories:YES attributes:nil error:NULL];
+    chmod(closed.fileSystemRepresentation, 0);
+
     BurrowServicePaths *paths = [[BurrowServicePaths alloc] init];
-    paths.reportDirectories = @[ reports, [scratch stringByAppendingPathComponent:@"no-such-directory"] ];
+    paths.reportDirectories = @[ reports, missing, closed ];
     paths.tweakDirectories = @[ @"/var/jb/usr/lib/TweakInject", [RealRoot stringByAppendingString:@"/usr/lib/TweakInject"] ];
     paths.jailbreakRoots = @[ @"/var/jb", RealRoot ];
     paths.dpkgDirectory = dpkg;
@@ -596,6 +604,13 @@ static void test_service(NSString *fixtures, NSString *dpkg, NSString *scratch) 
     CHECK([service scan] == 3);
     CHECK([service scan] == 0);
     CHECK(![files fileExistsAtPath:paths.settingsPath]);
+    NSDictionary *directories = service.statistics[@"Directories"];
+    CHECK([directories[reports] integerValue] == 6);
+    CHECK([directories[missing] integerValue] == BurrowReportDirectoryMissing);
+    if (geteuid() != 0) {
+        CHECK([directories[closed] integerValue] == BurrowReportDirectoryUnreadable);
+    }
+    chmod(closed.fileSystemRepresentation, 0755);
 
     // Safe Mode on from a date: only later crashes turn tweaks off.
     service.safeModeSince = fixture(fixtures, @"exception.ips").date;

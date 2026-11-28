@@ -1,10 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- SPDX-License-Identifier: Apache-2.0 -->
-<!-- Entitlements of the test programs that run on a jailbroken device. -->
+<!-- Entitlements of the test programs that run on a jailbroken device.
+     On iOS 18.1.1 with RootHide Dopamine, a program without no-container
+     and no-sandbox runs in a sandbox: it can create no directory in /tmp,
+     where the loader and Safe Mode tests work, and cannot read the crash
+     reports of the crashes the Safe Mode tests cause. -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
 	<key>get-task-allow</key>
+	<true/>
+	<key>com.apple.private.security.no-container</key>
+	<true/>
+	<key>com.apple.private.security.no-sandbox</key>
 	<true/>
 </dict>
 </plist>

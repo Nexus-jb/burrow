@@ -118,6 +118,13 @@ jobs:
           lipo -info build/ios-universal-roothide/*
           sh tests/preinst_tests.sh
           ldid -e build/ios/arm64e/hook-tests
+          # Out of RootHide's sandbox, which keeps programs from the crash
+          # reports and /tmp.
+          for binary in build/ios-universal/burrowd build/ios-universal/burrowctl \
+              build/ios-universal-roothide/burrowd build/ios-universal-roothide/burrowctl \
+              build/ios/arm64e/loader/loader-tests build/ios/arm64e/loader/safemode-tests; do
+            ldid -e "$binary" | grep -q com.apple.private.security.no-sandbox
+          done
           lipo -info build/ios/arm64/hook-tests build/ios/arm64e/hook-tests build/ios/BurrowSampleTweak.dylib
           otool -L build/ios/BurrowSampleTweak.dylib
           otool -l build/ios/BurrowSampleTweak.dylib | grep -A2 LC_RPATH
