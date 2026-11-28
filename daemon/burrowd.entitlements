@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Entitlements of burrowd and burrowctl. iOS 18 keeps the crash reports
+     in /var/mobile/Library/Logs/CrashReporter from processes without this
+     entitlement, root's included (iOS 16 did not). Both programs only read
+     them. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>com.apple.private.security.storage.DiagnosticReports</key>
+	<true/>
+</dict>
+</plist>

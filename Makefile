@@ -169,18 +169,19 @@ $(IOS_BUILD)/%/BurrowLoader.dylib: src/loader.c src/jbroot.c $(HEADERS)
 $(IOS_BUILD)/%/loader/loader-tests: $(LOADER_TEST_SOURCES) $(HEADERS)
 	LDID="$(LDID)" scripts/build-loader-tests.sh $(IOS_BUILD)/$*/loader ios $(IOS_CC) -arch $* -mios-version-min=15.0
 
-# burrowd and burrowctl: Objective-C, never loaded into other processes.
-$(IOS_BUILD)/%/burrowd: daemon/burrowd.m $(SERVICE) $(SERVICE_HEADERS)
+# burrowd and burrowctl: Objective-C, never loaded into other processes. Both
+# read the system's crash reports (daemon/burrowd.entitlements).
+$(IOS_BUILD)/%/burrowd: daemon/burrowd.m $(SERVICE) $(SERVICE_HEADERS) daemon/burrowd.entitlements
 	mkdir -p $(@D)
 	$(IOS_CC) -arch $* -mios-version-min=15.0 $(COMMON) -fobjc-arc -Isafemode -Idaemon $(CFLAGS) \
 		daemon/burrowd.m $(SERVICE) -o $@ -framework Foundation
-	$(LDID) -S $@
+	$(LDID) -Sdaemon/burrowd.entitlements $@
 
-$(IOS_BUILD)/%/burrowctl: daemon/burrowctl.m $(SERVICE) $(SERVICE_HEADERS)
+$(IOS_BUILD)/%/burrowctl: daemon/burrowctl.m $(SERVICE) $(SERVICE_HEADERS) daemon/burrowd.entitlements
 	mkdir -p $(@D)
 	$(IOS_CC) -arch $* -mios-version-min=15.0 $(COMMON) -fobjc-arc -Isafemode -Idaemon $(CFLAGS) \
 		daemon/burrowctl.m $(SERVICE) -o $@ -framework Foundation
-	$(LDID) -S $@
+	$(LDID) -Sdaemon/burrowd.entitlements $@
 
 # The crash probe for checking burrowd on a device (see the probe's source).
 $(IOS_BUILD)/%/burrow-crash-probe: tests/safemode/probe/probe.c tests/ios.entitlements
@@ -204,17 +205,17 @@ $(IOS_ROOTHIDE)/%/BurrowLoader.dylib: src/loader.c src/jbroot.c $(HEADERS)
 		-install_name @rpath/BurrowLoader.dylib src/loader.c src/jbroot.c -o $@ -framework CoreFoundation -lobjc
 	$(LDID) -S $@
 
-$(IOS_ROOTHIDE)/%/burrowd: daemon/burrowd.m $(SERVICE) $(SERVICE_HEADERS)
+$(IOS_ROOTHIDE)/%/burrowd: daemon/burrowd.m $(SERVICE) $(SERVICE_HEADERS) daemon/burrowd.entitlements
 	mkdir -p $(@D)
 	$(IOS_CC) -arch $* -mios-version-min=15.0 $(COMMON) -DBURROW_ROOTHIDE -fobjc-arc -Isafemode -Idaemon $(CFLAGS) \
 		daemon/burrowd.m $(SERVICE) -o $@ -framework Foundation
-	$(LDID) -S $@
+	$(LDID) -Sdaemon/burrowd.entitlements $@
 
-$(IOS_ROOTHIDE)/%/burrowctl: daemon/burrowctl.m $(SERVICE) $(SERVICE_HEADERS)
+$(IOS_ROOTHIDE)/%/burrowctl: daemon/burrowctl.m $(SERVICE) $(SERVICE_HEADERS) daemon/burrowd.entitlements
 	mkdir -p $(@D)
 	$(IOS_CC) -arch $* -mios-version-min=15.0 $(COMMON) -DBURROW_ROOTHIDE -fobjc-arc -Isafemode -Idaemon $(CFLAGS) \
 		daemon/burrowctl.m $(SERVICE) -o $@ -framework Foundation
-	$(LDID) -S $@
+	$(LDID) -Sdaemon/burrowd.entitlements $@
 
 # Universal binaries for the packages: every process, arm64 or arm64e, can
 # load the libraries.

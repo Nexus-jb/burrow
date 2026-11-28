@@ -129,6 +129,11 @@ real() {
     @REAL@ "$1"
 }
 libexec=@JB@/usr/libexec/burrow-tests
+# The jailbreak's tweak loader stays out of the test programs, whichever
+# loader is on: ElleKit's library would otherwise answer for the sample
+# tweak's CydiaSubstrate.framework. The tests load what they test
+# themselves. Dopamine and RootHide skip injection when this is 1.
+export DISABLE_TWEAKS=1
 uname -m
 for arch in arm64 arm64e; do
     dir=$libexec/$arch

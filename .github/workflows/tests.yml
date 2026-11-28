@@ -118,6 +118,16 @@ jobs:
           lipo -info build/ios-universal-roothide/*
           sh tests/preinst_tests.sh
           ldid -e build/ios/arm64e/hook-tests
+          # iOS 18 keeps the crash reports and /tmp from programs without
+          # these entitlements.
+          for binary in build/ios/arm64e/burrowd build/ios/arm64e/burrowctl \
+              build/ios-roothide/arm64e/burrowd build/ios-roothide/arm64e/burrowctl \
+              build/ios/arm64e/loader/safemode-tests; do
+            ldid -e "$binary" | grep -q com.apple.private.security.storage.DiagnosticReports
+          done
+          for binary in build/ios/arm64e/loader/loader-tests build/ios/arm64e/loader/safemode-tests; do
+            ldid -e "$binary" | grep -q com.apple.private.security.storage.tmp
+          done
           lipo -info build/ios/arm64/hook-tests build/ios/arm64e/hook-tests build/ios/BurrowSampleTweak.dylib
           otool -L build/ios/BurrowSampleTweak.dylib
           otool -l build/ios/BurrowSampleTweak.dylib | grep -A2 LC_RPATH

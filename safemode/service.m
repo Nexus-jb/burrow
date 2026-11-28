@@ -9,9 +9,14 @@
 #import "safe_mode.h"
 #import "state.h"
 
+#include <errno.h>
 #include <limits.h>
 #include <os/log.h>
 #include <stdlib.h>
+#include <sys/stat.h>
+
+const NSInteger BurrowReportDirectoryMissing = -1;
+const NSInteger BurrowReportDirectoryUnreadable = -2;
 
 // A report that cannot be read yet may still be being written.
 static const NSTimeInterval ReportWriteTime = 60;
@@ -179,9 +184,16 @@ static BOOL outside_images(BurrowCrashFrame *frame) {
     NSMutableArray<NSString *> *reports = [NSMutableArray array];
     for (NSString *directory in _paths.reportDirectories) {
         NSArray<NSString *> *names = [files contentsOfDirectoryAtPath:directory error:NULL];
-        _directories[directory] = names ? @([names filteredArrayUsingPredicate:
-                                                   [NSPredicate predicateWithFormat:@"self ENDSWITH '.ips'"]].count)
-                                        : @(-1);
+        if (names) {
+            _directories[directory] =
+                @([names filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"self ENDSWITH '.ips'"]].count);
+        } else {
+            // A directory the system keeps from this process (iOS 18 does
+            // without an entitlement) is not a missing one.
+            struct stat info;
+            BOOL missing = stat(directory.fileSystemRepresentation, &info) != 0 && errno == ENOENT;
+            _directories[directory] = @(missing ? BurrowReportDirectoryMissing : BurrowReportDirectoryUnreadable);
+        }
         for (NSString *name in names) {
             NSString *path = [directory stringByAppendingPathComponent:name];
             if ([name hasSuffix:@".ips"] && ![_seen containsObject:path]) {

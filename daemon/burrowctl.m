@@ -104,8 +104,15 @@ static int status(BurrowServicePaths *paths) {
         if ([directories isKindOfClass:[NSDictionary class]]) {
             for (NSString *directory in [directories.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
                 NSInteger count = [directories[directory] integerValue];
-                print(count < 0 ? [NSString stringWithFormat:@"                 %@: missing", directory]
-                                : [NSString stringWithFormat:@"                 %@: %ld reports", directory, (long)count]);
+                NSString *line;
+                if (count == BurrowReportDirectoryMissing) {
+                    line = [NSString stringWithFormat:@"                 %@: missing", directory];
+                } else if (count < 0) {
+                    line = [NSString stringWithFormat:@"                 %@: not readable", directory];
+                } else {
+                    line = [NSString stringWithFormat:@"                 %@: %ld reports", directory, (long)count];
+                }
+                print(line);
             }
         }
     }

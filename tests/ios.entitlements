@@ -1,10 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- SPDX-License-Identifier: Apache-2.0 -->
-<!-- Entitlements of the test programs that run on a jailbroken device. -->
+<!-- Entitlements of the test programs that run on a jailbroken device.
+     iOS 18 keeps /tmp and the crash reports from processes without the two
+     storage entitlements (iOS 16 did not): the loader and Safe Mode tests
+     work in /tmp, and the Safe Mode tests read the reports of the crashes
+     they cause. -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
 	<key>get-task-allow</key>
+	<true/>
+	<key>com.apple.private.security.storage.tmp</key>
+	<true/>
+	<key>com.apple.private.security.storage.DiagnosticReports</key>
 	<true/>
 </dict>
 </plist>

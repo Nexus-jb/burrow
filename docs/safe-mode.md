@@ -167,6 +167,11 @@ The Burrow package runs `burrowd`, a launch daemon. It watches
 `/var/mobile/Library/Logs/CrashReporter`, where the system writes the crash
 reports of every process, root's included, and hands every new report to
 the crash log. On its first start it reads the reports already there.
+iOS 18 keeps that directory from processes without the entitlement
+`com.apple.private.security.storage.DiagnosticReports`, root's included,
+so `burrowd` and `burrowctl` carry it (`daemon/burrowd.entitlements`).
+`burrowctl status` tells a directory that is missing from one that
+`burrowd` may not read.
 
 Safe Mode acts only once Burrow's loader is the one loading tweaks: before
 that, turning a tweak off in Burrow's settings would change nothing. It
