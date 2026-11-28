@@ -158,7 +158,12 @@ one, built with `BURROW_ROOTHIDE`:
 The tests run the RootHide loader in a stand-in hidden root, and the switch
 and the package index on a copy of one. The `burrow-tests` package for
 RootHide hands the test programs real paths through RootHide's `jbroot`
-command.
+command, and hands dpkg-divert the copy's paths under `/rootfs`, where
+RootHide's tools see the rest of the file system. On iOS 18.1.1 with
+RootHide, the system mapped no code from `/tmp`, where the stand-in root
+is; there the loader tests report those checks as skipped. The macOS tests
+in CI run them, and the device check is Burrow's loader in the real hidden
+root.
 
 ## Switching from ElleKit's loader
 

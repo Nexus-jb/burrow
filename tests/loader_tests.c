@@ -94,6 +94,8 @@ static const struct settings_case CASES[] = {
 
 static unsigned checks;
 static unsigned failures;
+// Checks the system would not let run (expect).
+static unsigned skipped;
 
 static bool write_settings(const char *path, const struct settings_case *test) {
     if (!test->settings) {
@@ -113,12 +115,17 @@ static bool write_settings(const char *path, const struct settings_case *test) {
     return fclose(file) == 0;
 }
 
-// Runs a target and returns what it printed, without the final newline.
-static bool run_target(const char *target, const char *loader, char *output, size_t size) {
+// The target's exit status when the system will not map the loader's code
+// from where it is (tests/loader/target.c).
+#define TARGET_CANNOT_MAP 77
+
+// Runs a target and returns its exit status, or -1 when it did not exit,
+// and what it printed, without the final newline.
+static int run_target(const char *target, const char *loader, char *output, size_t size) {
     output[0] = '\0';
     int fds[2];
     if (pipe(fds) != 0) {
-        return false;
+        return -1;
     }
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
@@ -133,7 +140,7 @@ static bool run_target(const char *target, const char *loader, char *output, siz
     if (spawned != 0) {
         close(fds[0]);
         fprintf(stderr, "[loader] cannot run %s: %s\n", target, strerror(spawned));
-        return false;
+        return -1;
     }
 
     size_t used = 0;
@@ -156,17 +163,23 @@ static bool run_target(const char *target, const char *loader, char *output, siz
     int status;
     while (waitpid(pid, &status, 0) < 0) {
         if (errno != EINTR) {
-            return false;
+            return -1;
         }
     }
-    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
 
 static void expect(const char *test, const char *label, const char *target, const char *loader,
                    const char *expected) {
-    checks++;
     char output[4096];
-    bool ran = run_target(target, loader, output, sizeof output);
+    int status = run_target(target, loader, output, sizeof output);
+    if (status == TARGET_CANNOT_MAP) {
+        skipped++;
+        fprintf(stderr, "[loader] %s, %s: skipped, the system maps no code from %s\n", test, label, loader);
+        return;
+    }
+    checks++;
+    bool ran = status == 0;
     if (!ran || strcmp(output, expected) != 0) {
         failures++;
         fprintf(stderr, "[loader] %s, %s: expected \"%s\", got \"%s\"%s\n", test, label, expected, output,
@@ -394,6 +407,10 @@ int main(int argc, char **argv) {
         fprintf(stderr, "[loader] %u of %u checks failed\n", failures, checks);
         return 1;
     }
-    printf("[loader] %u checks passed\n", checks);
+    if (skipped) {
+        printf("[loader] %u checks passed, %u skipped\n", checks, skipped);
+    } else {
+        printf("[loader] %u checks passed\n", checks);
+    }
     return 0;
 }

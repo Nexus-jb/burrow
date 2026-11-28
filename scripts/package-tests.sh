@@ -89,7 +89,7 @@ mkdir -p "$stage$jb/usr/lib/TweakInject"
 install -m 0755 "$universal/BurrowCrashProbe.dylib" "$stage$jb/usr/lib/TweakInject/BurrowCrashProbe.dylib"
 install -m 0644 tests/safemode/probe/BurrowCrashProbe.plist "$stage$jb/usr/lib/TweakInject/BurrowCrashProbe.plist"
 
-# @JB@ and @REAL@ are filled in below.
+# @JB@, @REAL@ and @SCHEME@ are filled in below.
 cat > "$stage/burrow-tests" <<'SCRIPT'
 #!@JB@/bin/sh
 # SPDX-License-Identifier: Apache-2.0
@@ -129,6 +129,16 @@ real() {
     @REAL@ "$1"
 }
 libexec=@JB@/usr/libexec/burrow-tests
+if [ @SCHEME@ = roothide ]; then
+    # For the Safe Mode tests: RootHide's dpkg-divert sees the hidden root
+    # as / and the rest of the file system under /rootfs, and PATH names
+    # directories in the hidden root.
+    export BURROW_TEST_TOOLS_ROOTFS=/rootfs
+    if divert=$(command -v dpkg-divert); then
+        BURROW_TEST_DPKG_DIVERT=$(real "$divert")
+        export BURROW_TEST_DPKG_DIVERT
+    fi
+fi
 uname -m
 for arch in arm64 arm64e; do
     dir=$libexec/$arch
@@ -155,7 +165,7 @@ else
     exit 1
 fi
 SCRIPT
-sed -e "s|@JB@|$jb|g" -e "s|@REAL@|$real|g" "$stage/burrow-tests" > "$stage$jb/usr/bin/burrow-tests"
+sed -e "s|@JB@|$jb|g" -e "s|@REAL@|$real|g" -e "s|@SCHEME@|$scheme|g" "$stage/burrow-tests" > "$stage$jb/usr/bin/burrow-tests"
 rm "$stage/burrow-tests"
 chmod 0755 "$stage$jb/usr/bin/burrow-tests"
 

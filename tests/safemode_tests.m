@@ -746,10 +746,29 @@ static NSString *in_path(NSString *command) {
     return nil;
 }
 
+// dpkg-divert: BURROW_TEST_DPKG_DIVERT, which burrow-tests sets to the file
+// on RootHide, where PATH names directories in the hidden root, or the one
+// in PATH.
+static NSString *find_dpkg_divert(void) {
+    NSString *given = NSProcessInfo.processInfo.environment[@"BURROW_TEST_DPKG_DIVERT"];
+    if (given.length) {
+        return given;
+    }
+    return in_path(@"dpkg-divert");
+}
+
+// A path in this program's file system as dpkg-divert names it. RootHide's
+// tools see the hidden root as / and the rest under the directory in
+// BURROW_TEST_TOOLS_ROOTFS, which burrow-tests sets to /rootfs.
+static NSString *for_dpkg_divert(NSString *path) {
+    NSString *rootfs = NSProcessInfo.processInfo.environment[@"BURROW_TEST_TOOLS_ROOTFS"];
+    return rootfs.length ? [rootfs stringByAppendingString:path] : path;
+}
+
 // The loader switch, on a copy of the file tree with its own dpkg database,
 // so the test never touches the system's files.
 static void test_switch(NSString *scratch) {
-    NSString *dpkg_divert = in_path(@"dpkg-divert");
+    NSString *dpkg_divert = find_dpkg_divert();
     CHECK(dpkg_divert != nil);
     if (!dpkg_divert) {
         fprintf(stderr, "[safemode] the switch tests need dpkg-divert\n");
@@ -775,7 +794,9 @@ static void test_switch(NSString *scratch) {
     [files createSymbolicLinkAtPath:loader withDestinationPath:@"/var/jb/usr/lib/ellekit/libinjector.dylib" error:NULL];
 
     BurrowSwitch *loader_switch =
-        [[BurrowSwitch alloc] initWithRoot:root dpkgDivert:@[ dpkg_divert, @"--admindir", admin, @"--instdir", root ]];
+        [[BurrowSwitch alloc] initWithRoot:root
+                                dpkgDivert:@[ dpkg_divert, @"--admindir", for_dpkg_divert(admin), @"--instdir",
+                                              for_dpkg_divert(root) ]];
     CHECK([loader_switch.loaderOwner isEqualToString:@"ElleKit"]);
 
     NSError *error = nil;
@@ -859,7 +880,7 @@ static void test_switch(NSString *scratch) {
 // naming that root as /, and links relative to their directory, which
 // still work when the root moves.
 static void test_roothide_switch(NSString *scratch) {
-    NSString *dpkg_divert = in_path(@"dpkg-divert");
+    NSString *dpkg_divert = find_dpkg_divert();
     if (!dpkg_divert) {
         return;  // test_switch reported it
     }
@@ -899,7 +920,8 @@ static void test_roothide_switch(NSString *scratch) {
     BurrowSwitch *hidden = [[BurrowSwitch alloc] initWithFiles:root
                                                          tools:@""
                                                  relativeLinks:YES
-                                                    dpkgDivert:@[ dpkg_divert, @"--admindir", admin, @"--instdir", root ]];
+                                                    dpkgDivert:@[ dpkg_divert, @"--admindir", for_dpkg_divert(admin),
+                                                                  @"--instdir", for_dpkg_divert(root) ]];
     CHECK([hidden.loaderOwner isEqualToString:@"ElleKit"]);
     CHECK([hidden.engineOwner isEqualToString:@"ElleKit"]);
 

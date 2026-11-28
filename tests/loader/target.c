@@ -9,6 +9,10 @@
 // BurrowLoaderPlainClass and does not use Foundation, and as LoaderTarget
 // inside LoaderTarget.app, which has a bundle identifier and uses
 // Foundation, like an app.
+//
+// It exits with 77 when the system will not map the loader's code from
+// where it is: on iOS 18.1.1 with RootHide, none from /tmp, where the tests
+// build their stand-in roots.
 
 #include <dlfcn.h>
 #include <objc/runtime.h>
@@ -51,8 +55,9 @@ int main(int argc, char **argv) {
         }
     }
     if (!dlopen(argv[1], RTLD_NOW)) {
-        fprintf(stderr, "%s\n", dlerror());
-        return 4;
+        const char *error = dlerror();
+        fprintf(stderr, "%s\n", error);
+        return error && strstr(error, "sandbox blocked mmap") ? 77 : 4;
     }
     printf("%s\n", loaded);
     return 0;
