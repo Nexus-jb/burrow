@@ -254,8 +254,22 @@ $(IOS_BUILD)/BurrowSampleTweak.dylib: tests/tweak/Tweak.x tests/tweak/Makefile
 	$(GNUMAKE) -C tests/tweak FINALPACKAGE=1
 	cp tests/tweak/.theos/obj/BurrowSampleTweak.dylib $@
 
+# A one-off check of what each set of entitlements allows (tests/access).
+ACCESS := v0 v1 v2 v3 v4 v5 bd
+
+$(IOS_BUILD)/arm64e/access/v%: tests/access/access.c tests/access/v%.entitlements
+	mkdir -p $(@D)
+	$(IOS_CC) -arch arm64e -mios-version-min=15.0 $(CFLAGS) tests/access/access.c -o $@
+	$(LDID) -Stests/access/v$*.entitlements $@
+
+$(IOS_BUILD)/arm64e/access/bd: tests/access/access.c daemon/burrowd.entitlements
+	mkdir -p $(@D)
+	$(IOS_CC) -arch arm64e -mios-version-min=15.0 $(CFLAGS) tests/access/access.c -o $@
+	$(LDID) -Sdaemon/burrowd.entitlements $@
+
 ios-tests: $(foreach arch,$(IOS_ARCHS),$(addprefix $(IOS_BUILD)/$(arch)/,$(IOS_PROGRAMS))) \
-	$(IOS_BUILD)/BurrowSampleTweak.dylib $(addprefix $(IOS_UNIVERSAL)/,$(PROBE))
+	$(IOS_BUILD)/BurrowSampleTweak.dylib $(addprefix $(IOS_UNIVERSAL)/,$(PROBE)) \
+	$(addprefix $(IOS_BUILD)/arm64e/access/,$(ACCESS))
 
 # The same test programs in both packages: rootless and RootHide.
 ios-tests-package: ios-tests

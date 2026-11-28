@@ -83,6 +83,9 @@ for arch in $architectures; do
     cp -R "$build/$arch/loader/." "$libexec/$arch/loader/"
 done
 cp "$build/BurrowSampleTweak.dylib" "$libexec/BurrowSampleTweak.dylib"
+if [ -d "$build/arm64e/access" ]; then
+    cp -R "$build/arm64e/access" "$libexec/access"
+fi
 chmod 0755 "$libexec/BurrowSampleTweak.dylib"
 install -m 0755 "$universal/burrow-crash-probe" "$libexec/burrow-crash-probe"
 mkdir -p "$stage$jb/usr/lib/TweakInject"
@@ -129,6 +132,15 @@ real() {
     @REAL@ "$1"
 }
 libexec=@JB@/usr/libexec/burrow-tests
+# "burrow-tests access": what each set of entitlements allows. d1 is the
+# jailbreak's /tmp, d2 /var/mobile/Library/Caches.
+if [ "${1:-}" = access ]; then
+    for name in v0 v1 v2 v3 v4 v5 bd; do
+        DISABLE_TWEAKS=1 DYLD_FRAMEWORK_PATH=/burrow-check "$libexec/access/$name" "$name" "$(real /tmp)" /var/mobile/Library/Caches
+    done
+    DYLD_FRAMEWORK_PATH=/burrow-check "$libexec/access/v0" v0tw "$(real /tmp)" /var/mobile/Library/Caches
+    exit 0
+fi
 # The jailbreak's tweak loader stays out of the test programs, whichever
 # loader is on. The tests load what they test themselves. Dopamine and
 # RootHide skip injection when this is 1.
