@@ -154,6 +154,10 @@ one, built with `BURROW_ROOTHIDE`:
 - The links that switch the loader and the engine are relative, such as
   `usr/lib/TweakLoader.dylib` to `burrow/BurrowLoader.dylib`, so that they
   do not name the hidden root.
+- The hidden root is under `/var/containers/Bundle/Application`, where
+  iOS lets no program make a link without the entitlement
+  `com.apple.private.security.storage.AppBundles`, root's included, so
+  `burrowd` and `burrowctl` carry it, as RootHide's own tools do.
 
 The tests run the RootHide loader in a stand-in hidden root, and the switch
 and the package index on a copy of one. The `burrow-tests` package for

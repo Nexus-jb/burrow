@@ -125,6 +125,10 @@ jobs:
               build/ios/arm64e/loader/loader-tests build/ios/arm64e/loader/safemode-tests; do
             ldid -e "$binary" | grep -q com.apple.private.security.no-sandbox
           done
+          # RootHide's hidden root: burrowd and burrowctl make links in it.
+          for binary in build/ios-universal-roothide/burrowd build/ios-universal-roothide/burrowctl; do
+            ldid -e "$binary" | grep -q com.apple.private.security.storage.AppBundles
+          done
           lipo -info build/ios/arm64/hook-tests build/ios/arm64e/hook-tests build/ios/BurrowSampleTweak.dylib
           otool -L build/ios/BurrowSampleTweak.dylib
           otool -l build/ios/BurrowSampleTweak.dylib | grep -A2 LC_RPATH

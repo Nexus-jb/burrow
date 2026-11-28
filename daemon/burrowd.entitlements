@@ -1,16 +1,22 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- SPDX-License-Identifier: Apache-2.0 -->
-<!-- Entitlements of burrowd and burrowctl. Both read the crash reports in
-     /var/mobile/Library/Logs/CrashReporter. On iOS 18.1.1 with RootHide
-     Dopamine, a program without these two runs in a sandbox that keeps it
-     from the reports, root's included; with them it reads them without
-     any storage entitlement. -->
+<!-- Entitlements of burrowd and burrowctl. On iOS 18.1.1 with RootHide
+     Dopamine:
+     - a program without no-container and no-sandbox runs in a sandbox that
+       keeps it from the crash reports in
+       /var/mobile/Library/Logs/CrashReporter, root's included;
+     - RootHide's hidden root is under /var/containers/Bundle/Application,
+       where a program without storage.AppBundles cannot make the links
+       that switch the loader and the engine, root's included. They change
+       nothing on rootless. -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
 	<key>com.apple.private.security.no-container</key>
 	<true/>
 	<key>com.apple.private.security.no-sandbox</key>
+	<true/>
+	<key>com.apple.private.security.storage.AppBundles</key>
 	<true/>
 </dict>
 </plist>
