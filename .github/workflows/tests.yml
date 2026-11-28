@@ -120,8 +120,8 @@ jobs:
           ldid -e build/ios/arm64e/hook-tests
           # iOS 18 keeps the crash reports and /tmp from programs without
           # these entitlements.
-          for binary in build/ios/arm64e/burrowd build/ios/arm64e/burrowctl \
-              build/ios-roothide/arm64e/burrowd build/ios-roothide/arm64e/burrowctl \
+          for binary in build/ios-universal/burrowd build/ios-universal/burrowctl \
+              build/ios-universal-roothide/burrowd build/ios-universal-roothide/burrowctl \
               build/ios/arm64e/loader/safemode-tests; do
             ldid -e "$binary" | grep -q com.apple.private.security.storage.DiagnosticReports
           done
