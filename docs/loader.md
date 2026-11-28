@@ -260,3 +260,4 @@ Device results (the 26 checks of 0.0.0~dev.48 ran on CI only):
 | ------ | ---- | --- | --------- | ----- | ------ |
 | iPhone 14 Pro Max | A16 (arm64 and arm64e tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.31 | All 20 loader checks passed for both architectures, with every other suite |
 | iPhone 14 Pro Max | A16 (arm64 and arm64e tests) | 16.3.1 | Dopamine, rootless, Burrow's loader as the tweak loader | 0.0.0~dev.70 | 29 of 33 loader checks passed for both architectures. The four safe mode cases failed because Dopamine removed the variables before the target started; the tests now have the target set them itself |
+| iPhone XS Max | A12 (arm64 and arm64e tests) | 18.1.1 | RootHide Dopamine, ElleKit | 0.0.0~dev.125 | 34 loader checks passed for both architectures; the 3 in a stand-in hidden root were skipped, since the system mapped no code from `/tmp`. The substrate checks passed with the sample tweak given Burrow's framework, and every other suite passed |

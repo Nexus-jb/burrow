@@ -265,6 +265,7 @@ Device results:
 | iPhone 14 Pro Max | A16 (arm64 and arm64e tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.39 | All 63 checks passed for both architectures, with real crash reports from iOS |
 | iPhone 14 Pro Max | A16 (arm64 and arm64e tests) | 16.3.1 | Dopamine, rootless | 0.0.0~dev.42 | All 94 checks passed for both architectures; the crash log named each crashing tweak and its package from the device's dpkg database |
 | iPhone 14 Pro Max | A16 | 16.3.1 | Dopamine, rootless, ElleKit loading tweaks | 0.0.0~dev.48 | burrowd read the device's 123 crash reports; `burrow-tests probe` crashed the probe through ElleKit, and burrowd logged the crash within seconds, blaming the probe tweak and naming its package |
+| iPhone XS Max | A12 (arm64 and arm64e tests) | 18.1.1 | RootHide Dopamine, ElleKit loading tweaks | 0.0.0~dev.125 | All 295 checks passed for both architectures, with real crash reports and the switch tests through RootHide's dpkg-divert. `burrow-tests probe`: burrowd logged the crash, blaming the probe tweak and naming its package. Until dev.123, burrowd and the tests ran in RootHide's sandbox and could not read the crash reports |
 
 `burrow-tests probe` checks burrowd itself on a device with the Burrow
 package installed. The test package puts the tweak `BurrowCrashProbe` in the
